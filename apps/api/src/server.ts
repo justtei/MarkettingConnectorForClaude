@@ -13,7 +13,8 @@ const created = await bootstrapOwner(core, process.env.OWNER_EMAIL?.trim(), proc
 if (created) logger.info({ email: created }, "Created the first owner user from OWNER_EMAIL");
 
 const port = Number(process.env.API_PORT ?? 3002);
-await app.listen({ port, host: "0.0.0.0" });
+// LISTEN_HOST=127.0.0.1 on a bare Windows/Linux install keeps it off the local network; Docker needs 0.0.0.0.
+await app.listen({ port, host: process.env.LISTEN_HOST?.trim() || "0.0.0.0" });
 
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
   process.on(sig, () => {

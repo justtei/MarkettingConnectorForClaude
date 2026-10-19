@@ -10,7 +10,8 @@ const server = createMcpHttpServer(core, {
   trustProxy: process.env.TRUST_PROXY !== "false",
 });
 
-server.listen(port, "0.0.0.0", () => {
+// LISTEN_HOST=127.0.0.1 on a bare Windows/Linux install keeps it off the local network; Docker needs 0.0.0.0.
+server.listen(port, process.env.LISTEN_HOST?.trim() || "0.0.0.0", () => {
   logger.info({ port, account: core.config.META_AD_ACCOUNT_ID, apiVersion: core.config.META_API_VERSION }, "Sandalez MCP server listening on /mcp");
 });
 

@@ -22,6 +22,7 @@ Browser ─HTTPS─► apps/web ─► apps/api ─┘      │
 | Run it on my laptop and use it from **Claude Code** (no server, no static IP) | [docs/local-laptop.md](docs/local-laptop.md) |
 | Also use it from **claude.ai** or other laptops, still from my laptop | [docs/local-laptop.md, step 8](docs/local-laptop.md#8-optional-reach-it-from-claudeai-or-other-laptops) (free Cloudflare Tunnel) |
 | Run it always-on on a server | [docs/deploy.md](docs/deploy.md) (any small VPS with Docker; a cPanel VPS with root also works) |
+| Run it on a Windows PC that can't run Docker, reachable from claude.ai through **Tailscale** | [docs/windows-native.md](docs/windows-native.md) (PostgreSQL + Windows services + Tailscale Funnel) |
 | Get the Meta token and IDs | [docs/meta-setup.md](docs/meta-setup.md) |
 | Connect Claude (claude.ai, Claude Code) | [docs/connect-claude.md](docs/connect-claude.md) |
 | Learn what to ask Claude, and the dashboard | [docs/usage.md](docs/usage.md) |
@@ -62,7 +63,7 @@ claude mcp add --scope user --transport http sandalez-ads http://localhost:3001/
 | `apps/api` | Fastify REST API for the dashboard, plus signed webhooks (WhatsApp Cloud API, Shopify → Conversions API) |
 | `apps/web` | Next.js dashboard: Overview, Campaigns, Ad detail, New campaign wizard, Orders, Creatives, Insights, Audiences, Alerts, Activity log, Settings |
 | `apps/worker` | Cron jobs: sync, alerts, weekly report email, token check (lease-locked, safe to run twice) |
-| `docs/` | [Laptop setup](docs/local-laptop.md), [VPS deployment](docs/deploy.md), [Meta setup](docs/meta-setup.md), [connecting Claude](docs/connect-claude.md), [usage](docs/usage.md), [commands](docs/commands.md), [tool reference](docs/mcp-tools.md) |
+| `docs/` | [Laptop setup](docs/local-laptop.md), [Windows without Docker](docs/windows-native.md), [VPS deployment](docs/deploy.md), [Meta setup](docs/meta-setup.md), [connecting Claude](docs/connect-claude.md), [usage](docs/usage.md), [commands](docs/commands.md), [tool reference](docs/mcp-tools.md) |
 | `docker-compose.yml` | VPS stack with Caddy (HTTPS); `docker-compose.local.yml` is the laptop overlay (localhost only, optional Cloudflare Tunnel); `docker-compose.demo.yml` runs against the Meta mock |
 
 ## Safety rules (enforced in `packages/core/src/guards.ts`)

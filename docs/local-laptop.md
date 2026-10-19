@@ -9,6 +9,7 @@ You need a public address only if **claude.ai** or **other laptops** should reac
 | Claude Code on this laptop only | Steps 1–7 |
 | claude.ai (web, desktop, phone), or Claude Code on other laptops | Steps 1–7, then step 8 |
 | Always on, with nothing running on a laptop | Use a VPS instead: [deploy.md](deploy.md) |
+| Docker Desktop won't install (no WSL / virtualization), or you want Tailscale | [windows-native.md](windows-native.md): no Docker, plus Tailscale Funnel |
 
 ## 1. Install the tools (once)
 
