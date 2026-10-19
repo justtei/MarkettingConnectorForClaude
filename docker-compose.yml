@@ -1,0 +1,90 @@
+# Production stack on one VPS: postgres, migrate (one-shot), api, mcp, worker, web, caddy (HTTPS).
+# 1. cp .env.example .env and fill it in (DATABASE_URL is set below).
+# 2. Set DOMAIN (dashboard) and MCP_DOMAIN in .env, point both DNS records at the VPS.
+# 3. docker compose up -d --build
+x-app: &app
+  build: { context: ., target: app }
+  image: sandalez-app
+  env_file: .env
+  environment:
+    DATABASE_URL: postgresql://sandalez:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/sandalez?schema=public
+    NODE_ENV: production
+  restart: unless-stopped
+  depends_on:
+    migrate: { condition: service_completed_successfully }
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sandalez
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: sandalez
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sandalez -d sandalez"]
+      interval: 5s
+      retries: 20
+
+  migrate:
+    build: { context: ., target: app }
+    image: sandalez-app
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://sandalez:${POSTGRES_PASSWORD}@postgres:5432/sandalez?schema=public
+    command: ["pnpm", "--filter", "@sandalez/db", "exec", "prisma", "migrate", "deploy"]
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: "no"
+
+  api:
+    <<: *app
+    command: ["pnpm", "--filter", "@sandalez/api", "start"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:'+(process.env.API_PORT||3002)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      retries: 5
+
+  mcp:
+    <<: *app
+    command: ["pnpm", "--filter", "@sandalez/mcp", "start"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:'+(process.env.MCP_PORT||3001)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      retries: 5
+
+  worker:
+    <<: *app
+    command: ["pnpm", "--filter", "@sandalez/worker", "start"]
+
+  web:
+    build: { context: ., target: web }
+    image: sandalez-web
+    env_file: .env
+    environment:
+      API_URL: http://api:${API_PORT:-3002}
+      AUTH_URL: https://${DOMAIN:?set DOMAIN}
+      PORT: "3000"
+    restart: unless-stopped
+    depends_on: [api]
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      DOMAIN: ${DOMAIN}
+      MCP_DOMAIN: ${MCP_DOMAIN:?set MCP_DOMAIN}
+      API_PORT: ${API_PORT:-3002}
+      MCP_PORT: ${MCP_PORT:-3001}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [web, mcp, api]
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

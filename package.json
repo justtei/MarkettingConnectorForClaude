@@ -1,0 +1,53 @@
+{
+  "name": "sandalez-ads",
+  "private": true,
+  "packageManager": "pnpm@10.34.7",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm --filter web build",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "docs:tools": "tsx scripts/gen-tool-docs.ts",
+    "setup:env": "tsx scripts/setup-env.mts",
+    "setup:check": "tsx scripts/setup-check.mts",
+    "setup:check:stack": "tsx scripts/setup-check.mts --mcp http://mcp:3001 --web http://web:3000 --api http://localhost:3002",
+    "db:generate": "pnpm --filter @sandalez/db run generate",
+    "db:migrate": "pnpm --filter @sandalez/db run migrate:dev",
+    "db:deploy": "pnpm --filter @sandalez/db run migrate:deploy",
+    "user:add": "pnpm --filter @sandalez/db run user:add",
+    "dev:mock": "pnpm --filter @sandalez/meta-mock run dev",
+    "dev:mcp": "pnpm --filter @sandalez/mcp run dev",
+    "dev:api": "pnpm --filter @sandalez/api run dev",
+    "dev:worker": "pnpm --filter @sandalez/worker run dev",
+    "dev:web": "pnpm --filter web run dev",
+    "job": "pnpm --filter @sandalez/worker run run-job"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "@playwright/test": "^1.64.1",
+    "@sandalez/core": "workspace:*",
+    "@sandalez/db": "workspace:*",
+    "@sandalez/mcp": "workspace:*",
+    "@sandalez/meta-mock": "workspace:*",
+    "@types/node": "^22.15.0",
+    "dotenv-cli": "^8.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0",
+    "zod": "^4.1.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "prisma",
+      "esbuild",
+      "sharp",
+      "unrs-resolver"
+    ]
+  }
+}

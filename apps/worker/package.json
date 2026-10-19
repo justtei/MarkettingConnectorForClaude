@@ -1,0 +1,21 @@
+{
+  "name": "@sandalez/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/jobs/index.ts" },
+  "scripts": {
+    "dev": "dotenv -e ../../.env -- tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
+    "run-job": "dotenv -e ../../.env -- tsx src/run-job.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@sandalez/core": "workspace:*",
+    "@sandalez/db": "workspace:*",
+    "node-cron": "^4.2.0"
+  },
+  "devDependencies": {
+    "dotenv-cli": "^8.0.0"
+  }
+}

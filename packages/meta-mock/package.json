@@ -1,0 +1,20 @@
+{
+  "name": "@sandalez/meta-mock",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "dotenv -e ../../.env -- tsx src/main.ts",
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@sandalez/core": "workspace:*"
+  },
+  "devDependencies": {
+    "dotenv-cli": "^8.0.0"
+  }
+}

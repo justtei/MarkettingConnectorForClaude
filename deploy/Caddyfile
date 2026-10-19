@@ -1,0 +1,33 @@
+# HTTPS for the dashboard and the MCP endpoint (certificates are automatic).
+{$DOMAIN} {
+	encode zstd gzip
+	# Public, signature-checked webhooks go straight to the API.
+	handle /webhooks/* {
+		reverse_proxy api:{$API_PORT}
+	}
+	# The REST API is internal only (the dashboard server calls it); never expose /api/* of the API service.
+	handle {
+		reverse_proxy web:3000
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+}
+
+{$MCP_DOMAIN} {
+	# Claude connects here: https://{$MCP_DOMAIN}/mcp (bearer) or /mcp/<MCP_PATH_SECRET>.
+	handle /mcp* {
+		reverse_proxy mcp:{$MCP_PORT}
+	}
+	handle /health {
+		reverse_proxy mcp:{$MCP_PORT}
+	}
+	handle {
+		respond 404
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+}

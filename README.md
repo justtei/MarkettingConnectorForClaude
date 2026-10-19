@@ -1,0 +1,129 @@
+# Sandalez Ads Tool
+
+A Node.js/TypeScript backend for Meta's Marketing API, scoped to the Sandalez ad account only. It is exposed two ways:
+
+- **an MCP server** that Claude drives from chat (43 tools), and
+- **a web dashboard** (mobile-first) for the owner and staff.
+
+Both are thin layers over one core package. That core is the only code that holds the Meta token and calls Meta, so the safety rules and the audit log apply to every change.
+
+```
+Claude ──MCP/HTTPS──► apps/mcp ─┐
+                                ├──► packages/core ──► Meta Marketing API v26 (system user token)
+Browser ─HTTPS─► apps/web ─► apps/api ─┘      │
+                         apps/worker ─────────┤  (sync every 3h, alerts, weekly report, token check)
+                                              └──► PostgreSQL (mirror, daily stats, orders, audit log)
+```
+
+## Getting started
+
+| I want to… | Guide |
+|---|---|
+| Run it on my laptop and use it from **Claude Code** (no server, no static IP) | [docs/local-laptop.md](docs/local-laptop.md) |
+| Also use it from **claude.ai** or other laptops, still from my laptop | [docs/local-laptop.md, step 8](docs/local-laptop.md#8-optional-reach-it-from-claudeai-or-other-laptops) (free Cloudflare Tunnel) |
+| Run it always-on on a server | [docs/deploy.md](docs/deploy.md) (any small VPS with Docker; a cPanel VPS with root also works) |
+| Get the Meta token and IDs | [docs/meta-setup.md](docs/meta-setup.md) |
+| Connect Claude (claude.ai, Claude Code) | [docs/connect-claude.md](docs/connect-claude.md) |
+| Learn what to ask Claude, and the dashboard | [docs/usage.md](docs/usage.md) |
+| Logs, restarts, users, jobs, database backup and restore | [docs/commands.md](docs/commands.md) |
+
+The short version for a laptop with Docker Desktop, Node 22 and pnpm:
+
+```bash
+git clone https://github.com/justtei/MarkettingConnectorForClaude.git sandalez-ads && cd sandalez-ads
+pnpm install
+pnpm setup:env --local --owner-email you@example.com   # generates .env with all secrets
+#   fill the META_* values in .env (docs/meta-setup.md), then:
+pnpm setup:check --env .env                           # checks the token and every ID
+docker compose up -d --build                          # database, MCP :3001, dashboard :3000, API, worker
+docker compose exec api pnpm setup:check:stack        # should end with READY
+claude mcp add --scope user --transport http sandalez-ads http://localhost:3001/mcp --header "Authorization: Bearer <MCP_BEARER_TOKEN from .env>"
+```
+
+## What's in the box
+
+| Path | What it is |
+|---|---|
+| `packages/core` | Meta client (version pin, `appsecret_proof`, retries, rate-limit backoff, pagination), error mapping, PKR↔minor-unit money helper, guards, audit log, all services, the **tool registry** |
+| `packages/db` | Prisma schema and migrations (spec tables + users, settings, assets, alert events, WhatsApp chats, reports) |
+| `packages/meta-mock` | A stateful fake of the Graph API, used by the tests and the Docker demo |
+| `apps/mcp` | MCP server, Streamable HTTP at `/mcp` (bearer token or URL path secret), plus a stdio entry |
+| `apps/api` | Fastify REST API for the dashboard, plus signed webhooks (WhatsApp Cloud API, Shopify → Conversions API) |
+| `apps/web` | Next.js dashboard: Overview, Campaigns, Ad detail, New campaign wizard, Orders, Creatives, Insights, Audiences, Alerts, Activity log, Settings |
+| `apps/worker` | Cron jobs: sync, alerts, weekly report email, token check (lease-locked, safe to run twice) |
+| `docs/` | [Laptop setup](docs/local-laptop.md), [VPS deployment](docs/deploy.md), [Meta setup](docs/meta-setup.md), [connecting Claude](docs/connect-claude.md), [usage](docs/usage.md), [commands](docs/commands.md), [tool reference](docs/mcp-tools.md) |
+| `docker-compose.yml` | VPS stack with Caddy (HTTPS); `docker-compose.local.yml` is the laptop overlay (localhost only, optional Cloudflare Tunnel); `docker-compose.demo.yml` runs against the Meta mock |
+
+## Safety rules (enforced in `packages/core/src/guards.ts`)
+
+| Rule | Enforcement |
+|---|---|
+| Creates are PAUSED | Every campaign, ad set and ad create is forced to `PAUSED`, whatever the input says |
+| Live actions need confirmation | `set_status` ACTIVE/ARCHIVED, `update_budget`, `update_targeting` and `bulk_update` refuse without `confirm: true`. The MCP instructions tell Claude to get your explicit yes first |
+| Budget cap | `MAX_DAILY_BUDGET_PKR` (default 2,000) and `MAX_BUDGET_INCREASE_PCT` (default 30%); editable by the owner in Settings |
+| One ad account | Every object ID is checked against `META_AD_ACCOUNT_ID`; other accounts are refused |
+| No deletes | No delete tools. Internal rollback of a failed multi-step create is the only delete |
+| Audit log | Every write stores who, what, request, response and the previous state (Activity log page and `get_activity_log`) |
+| Token safety | The token lives only in server env vars; `check_token` and a daily job warn before expiry |
+| Rate limits | Usage headers are read on every response; calls slow down above 75% and back off on rate-limit errors; the dashboard reads the DB, not Meta |
+| Clear errors | Meta error codes are mapped to plain language, with `fbtrace_id` kept for Meta support |
+| Ad policy | Activation returns a policy reminder; the dashboard shows it in the confirm dialog |
+
+## Development (without Docker, against the Meta mock)
+
+Requirements: Node 22+, pnpm 10, Docker (for Postgres).
+
+```bash
+pnpm install
+docker run -d --name sandalez-pg -e POSTGRES_USER=sandalez -e POSTGRES_PASSWORD=sandalez -e POSTGRES_DB=sandalez -p 5433:5432 postgres:17-alpine
+cp .env.example .env    # for the mock: META_ACCESS_TOKEN=test-token, META_AD_ACCOUNT_ID=act_1234567890,
+                        # META_GRAPH_BASE_URL=http://127.0.0.1:4010, DATABASE_URL=...localhost:5433/sandalez
+pnpm db:deploy
+pnpm dev:mock     # fake Meta on :4010
+pnpm dev:api      # :3002  (creates OWNER_EMAIL / OWNER_PASSWORD on first start)
+pnpm dev:mcp      # :3001/mcp
+pnpm dev:worker
+pnpm dev:web      # http://localhost:3000
+pnpm setup:check --mcp http://localhost:3001 --api http://localhost:3002 --web http://localhost:3000   # should end with READY
+```
+
+Or run the whole stack in Docker against the mock (needs a `.env.demo`; see [deploy.md](docs/deploy.md)):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.demo.yml --env-file .env.demo up -d --build
+```
+
+## Tests
+
+```bash
+pnpm test        # 189 tests: core units, MCP end-to-end over HTTP + stdio, REST API, worker, setup scripts
+pnpm test:e2e    # Playwright UI flows (desktop + mobile) against a running stack
+pnpm typecheck
+```
+
+The MCP tests start the real MCP HTTP server and connect with the official MCP SDK client. Every tool runs against the Meta mock, including the guard refusals, rollbacks, rate-limit retries and injected Meta failures. They need the test database: Postgres on `localhost:5433` with a `sandalez_test` database (override with `TEST_DATABASE_URL`).
+
+## Setup commands
+
+- `pnpm setup:env [--local] [--out .env] [--owner-email ...] [--domain ...] [--mcp-domain ...]`: writes the env file (default `.env.production`; `.env` with `--local`) with every internal secret generated. Re-running keeps existing values.
+- `pnpm setup:check [--env .env] [--production] [--mcp URL] [--api URL] [--web URL]`: read-only check of the env, database, Meta token and IDs, SMTP and the running services. Ends with `READY` or a list of what to fix (exit code 1).
+- `docker compose exec api pnpm setup:check:stack`: the same check from inside the running Docker stack.
+
+## Day-to-day
+
+- `docker compose exec api pnpm user:add <email> <password> [owner|staff]`: add or reset a dashboard user.
+- `docker compose exec worker pnpm job sync|alerts|weekly_report|token_check`: run a worker job by hand.
+- More in [docs/commands.md](docs/commands.md). Without Docker, drop the `docker compose exec <service>` prefix.
+- `pnpm docs:tools`: regenerate `docs/mcp-tools.md` after changing a tool.
+- **Every quarter:** check Meta's Marketing API changelog and bump `META_API_VERSION`.
+
+## Before the first real campaign
+
+The spec asks to verify three payload details with a PAUSED object on the real account. The code follows Meta's click-to-WhatsApp guide, but confirm these in Ads Manager after your first `create_ctwa_campaign`:
+
+1. **Welcome message placement.** `page_welcome_message` is sent as an object inside `link_data` / `video_data`, as in Meta's current guide (`packages/core/src/services/creative-payload.ts`). Check the greeting and the pre-filled text in the ad preview.
+2. **Advantage+ audience.** Every ad set states `targeting_automation.advantage_audience` (required since v26.0). It is on by default, so Meta treats age and gender as suggestions; it is off automatically when `age_min` is above 25. Pass `advantage_audience: false` for strict targeting.
+3. **Optimization.** `optimization_goal: CONVERSATIONS` with `OUTCOME_ENGAGEMENT` and destination `WHATSAPP`.
+4. **Budget units.** Check that the first budget shows as PKR 600, not 6 or 60,000 (the money helper is unit-tested, but confirm once on the live account).
+
+If Meta rejects a field, the error comes back in plain language with its `fbtrace_id`, and the rollback deletes the partial objects.

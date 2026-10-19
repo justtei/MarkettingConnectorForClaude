@@ -1,0 +1,209 @@
+// Sandalez Ads Tool — database schema.
+// Spec tables: Campaign, AdSet, Ad, Creative, DailyStat, OrderLog, Alert, AuditLog.
+// Supporting tables: User (dashboard login), Setting (editable caps), Asset (uploaded media),
+// AlertEvent (fired alerts), WhatsappChat (Cloud API webhook), Report (weekly reports).
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Campaign {
+  id              String   @id // Meta campaign ID
+  name            String
+  objective       String
+  status          String
+  effectiveStatus String?
+  dailyBudget     Int? // PKR major units, only for campaign-budget campaigns
+  createdVia      String   @default("ads_manager") // mcp | dashboard | ads_manager
+  adSets          AdSet[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model AdSet {
+  id              String    @id
+  campaignId      String
+  campaign        Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  name            String
+  status          String
+  effectiveStatus String?
+  dailyBudget     Int? // PKR (major units, converted in core)
+  targeting       Json
+  destination     String? // WHATSAPP, WEBSITE, ...
+  optimization    String?
+  ads             Ad[]
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([campaignId])
+}
+
+model Ad {
+  id              String      @id
+  adSetId         String
+  adSet           AdSet       @relation(fields: [adSetId], references: [id], onDelete: Cascade)
+  name            String
+  status          String
+  effectiveStatus String?
+  creativeId      String?
+  creative        Creative?   @relation(fields: [creativeId], references: [id])
+  stats           DailyStat[]
+  orders          OrderLog[]
+  chats           WhatsappChat[]
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@index([adSetId])
+}
+
+model Creative {
+  id          String   @id // Meta creative ID
+  name        String?
+  type        String // image | video | carousel | instagram_post | dynamic | catalog
+  mediaRef    String? // image hash or video ID
+  sourceUrl   String?
+  thumbnailUrl String?
+  headline    String?
+  primaryText String?
+  ads         Ad[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Asset {
+  id          String   @id @default(cuid())
+  type        String // image | video
+  metaRef     String   @unique // image hash or video ID
+  name        String?
+  sourceUrl   String?
+  previewUrl  String?
+  archived    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+}
+
+model DailyStat {
+  adId          String
+  ad            Ad       @relation(fields: [adId], references: [id], onDelete: Cascade)
+  date          DateTime @db.Date
+  spend         Decimal  @db.Decimal(14, 2)
+  impressions   Int
+  reach         Int
+  clicks        Int
+  conversations Int // messaging conversations started
+  frequency     Decimal  @db.Decimal(8, 4)
+  videoP25      Int?
+  videoP50      Int?
+  videoP75      Int?
+  videoP100     Int?
+  breakdowns    Json?
+  syncedAt      DateTime @default(now()) @updatedAt
+
+  @@id([adId, date])
+  @@index([date])
+}
+
+model OrderLog {
+  id        String   @id @default(cuid())
+  date      DateTime @db.Date
+  adId      String?
+  ad        Ad?      @relation(fields: [adId], references: [id], onDelete: SetNull)
+  chats     Int
+  orders    Int
+  refused   Int      @default(0)
+  revenue   Int // PKR
+  note      String?
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([date])
+}
+
+model Alert {
+  id              String       @id @default(cuid())
+  name            String?
+  metric          String // cost_per_chat | spend | frequency | spend_stopped | ctr
+  operator        String // gt | lt
+  threshold       Decimal      @db.Decimal(14, 4)
+  objectId        String? // campaign / ad set / ad; null = whole account
+  active          Boolean      @default(true)
+  mutedUntil      DateTime?
+  lastTriggeredAt DateTime?
+  events          AlertEvent[]
+  createdAt       DateTime     @default(now())
+}
+
+model AlertEvent {
+  id        String   @id @default(cuid())
+  alertId   String
+  alert     Alert    @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  at        DateTime @default(now())
+  value     Decimal  @db.Decimal(14, 4)
+  message   String
+  objectId  String?
+
+  @@index([alertId, at])
+}
+
+model AuditLog {
+  id       String   @id @default(cuid())
+  at       DateTime @default(now())
+  actor    String // claude-mcp | user email | worker
+  action   String // create_adset, set_status, ...
+  objectId String?
+  ok       Boolean  @default(true)
+  request  Json
+  response Json
+  before   Json?
+
+  @@index([at])
+  @@index([objectId])
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String?
+  passwordHash String
+  role         String   @default("staff") // owner | staff
+  createdAt    DateTime @default(now())
+}
+
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+model WhatsappChat {
+  id          String   @id @default(cuid())
+  waId        String // customer's WhatsApp ID (phone)
+  adId        String?
+  ad          Ad?      @relation(fields: [adId], references: [id], onDelete: SetNull)
+  sourceId    String? // referral.source_id from the webhook
+  ctwaClid    String?
+  headline    String?
+  firstText   String?
+  date        DateTime @db.Date
+  at          DateTime @default(now())
+
+  @@unique([waId, date])
+  @@index([date])
+}
+
+model Report {
+  id        String   @id @default(cuid())
+  kind      String // weekly
+  periodStart DateTime @db.Date
+  periodEnd   DateTime @db.Date
+  data      Json
+  html      String
+  emailedTo String?
+  createdAt DateTime @default(now())
+}

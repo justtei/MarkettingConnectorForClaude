@@ -1,0 +1,22 @@
+{
+  "name": "@sandalez/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./dates": "./src/util/dates.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@sandalez/db": "workspace:*",
+    "pino": "^9.7.0",
+    "zod": "^4.1.0",
+    "nodemailer": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/nodemailer": "^7.0.0"
+  }
+}

@@ -1,0 +1,34 @@
+# Laptop / home PC overlay: the whole stack on your own machine, no server and no static IP.
+# Ports are bound to 127.0.0.1 only, so nothing is reachable from your Wi-Fi or the internet.
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+#     dashboard  http://localhost:3000      MCP  http://localhost:3001/mcp
+# Optional, to reach it from claude.ai or other laptops (see docs/local-laptop.md):
+#   --profile quick-tunnel   temporary https://<random>.trycloudflare.com address for the MCP server, no account needed
+#   --profile tunnel         permanent addresses on your own domain via a Cloudflare Tunnel (CLOUDFLARE_TUNNEL_TOKEN)
+services:
+  api:
+    ports: ["127.0.0.1:3002:3002"]
+  mcp:
+    ports: ["127.0.0.1:3001:3001"]
+  web:
+    environment:
+      AUTH_URL: ${DASHBOARD_URL:-http://localhost:3000}
+    ports: ["127.0.0.1:3000:3000"]
+  caddy:
+    profiles: ["prod"]
+
+  quick-tunnel:
+    image: cloudflare/cloudflared:2026.9.3
+    profiles: ["quick-tunnel"]
+    command: ["tunnel", "--no-autoupdate", "--url", "http://mcp:3001"]
+    restart: unless-stopped
+    depends_on: [mcp]
+
+  tunnel:
+    image: cloudflare/cloudflared:2026.9.3
+    profiles: ["tunnel"]
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    restart: unless-stopped
+    depends_on: [mcp, web, api]

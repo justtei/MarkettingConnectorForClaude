@@ -1,0 +1,28 @@
+# Demo / staging overlay: runs the whole stack against the Meta mock (no real ad account needed),
+# without Caddy, on http://localhost:3000 (dashboard) and http://localhost:3001/mcp (MCP).
+#   docker compose -f docker-compose.yml -f docker-compose.demo.yml --env-file .env.demo up -d --build
+x-mock-env: &mock-env
+  META_GRAPH_BASE_URL: http://meta-mock:4010
+  META_ACCESS_TOKEN: test-token
+
+services:
+  meta-mock:
+    image: sandalez-app
+    command: ["pnpm", "--filter", "@sandalez/meta-mock", "start"]
+    env_file: .env.demo
+    environment: { MOCK_PORT: "4010", MOCK_HOST: "0.0.0.0", MOCK_PUBLIC_URL: "http://meta-mock:4010" }
+    ports: ["4010:4010"]
+  api:
+    environment: *mock-env
+    ports: ["3002:3002"]
+  mcp:
+    environment: *mock-env
+    ports: ["3001:3001"]
+  worker:
+    environment: *mock-env
+  web:
+    environment:
+      AUTH_URL: http://localhost:3000
+    ports: ["3000:3000"]
+  caddy:
+    profiles: ["prod"]
