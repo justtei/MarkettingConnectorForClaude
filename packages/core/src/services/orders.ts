@@ -204,8 +204,9 @@ function finish(b: Bucket) {
     // Refusals out of orders whose outcome is known (pending ones would hide refusals still to come).
     refusal_rate_pct: settled > 0 ? r((b.refused / settled) * 100) : null,
     chat_to_order_pct: b.chats ? r((b.orders / b.chats) * 100) : null,
-    roas: b.spend ? r(b.revenue / b.spend) : null,
-    roas_delivered: b.spend ? r(b.revenue_delivered / b.spend) : null,
+    // No orders recorded = unknown, not zero (otherwise a "ROAS below X" alert fires before any order data exists).
+    roas: b.spend && b.orders ? r(b.revenue / b.spend) : null,
+    roas_delivered: b.spend && b.orders ? r(b.revenue_delivered / b.spend) : null,
   };
 }
 
