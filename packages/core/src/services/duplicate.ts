@@ -83,12 +83,23 @@ export async function rebuildCampaignCopy(ctx: CoreContext, sourceId: string, op
         ...(s.bid_amount ? { bid_amount: s.bid_amount } : {}),
         ...(s.destination_type ? { destination_type: s.destination_type } : {}),
         ...(s.promoted_object ? { promoted_object: s.promoted_object } : {}),
-        ...(s.attribution_spec ? { attribution_spec: s.attribution_spec } : {}),
+        // Chat-optimised ad sets only accept Meta's default window (1-day click) since 2026; older ones still carry 7 days.
+        ...(s.attribution_spec && s.optimization_goal !== "CONVERSATIONS" ? { attribution_spec: s.attribution_spec } : {}),
         ...(s.is_dynamic_creative ? { is_dynamic_creative: true } : {}),
         ...(endTime ? { end_time: endTime } : {}),
         targeting,
       });
-      const adset = await ctx.meta.post<{ id: string }>(`${acc}/adsets`, params);
+      let adset: { id: string };
+      try {
+        adset = await ctx.meta.post<{ id: string }>(`${acc}/adsets`, params);
+      } catch (err) {
+        // Meta: "The click attribution window is optional. For the selected objective and performance goal, use one of
+        // these supported windows: 1 days." Retry once with Meta's default window.
+        if (!("attribution_spec" in params) || !/attribution/i.test(describeError(err).message)) throw err;
+        const { attribution_spec: _dropped, ...rest } = params as Record<string, unknown>;
+        adset = await ctx.meta.post<{ id: string }>(`${acc}/adsets`, rest);
+        notes.push(`ad set "${s.name}": Meta refused the old attribution window, so it uses Meta's default`);
+      }
       created.push({ type: "adset", id: adset.id });
       rememberOwned(ctx, adset.id, "adset");
 

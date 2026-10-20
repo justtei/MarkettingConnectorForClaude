@@ -56,6 +56,7 @@ The first owner (`OWNER_EMAIL` / `OWNER_PASSWORD` from `.env`) is created on the
 | Check alerts | `docker compose exec worker pnpm job alerts` | every 3 hours, at :15 (`ALERTS_CRON`) |
 | Weekly report email | `docker compose exec worker pnpm job weekly_report` | Monday 09:00 (`WEEKLY_REPORT_CRON`) |
 | Token expiry check | `docker compose exec worker pnpm job token_check` | daily 08:00 (`TOKEN_CHECK_CRON`) |
+| Shopify order sync | `docker compose exec worker pnpm job shop_sync` | every 30 minutes, when Shopify is connected (`SHOP_SYNC_CRON`) |
 
 Times are Asia/Karachi. Change the schedules in `.env`, then `docker compose up -d`.
 

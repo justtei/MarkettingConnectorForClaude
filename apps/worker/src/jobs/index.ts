@@ -6,6 +6,7 @@ import {
   reportsService,
   sendEmail,
   settingsService,
+  shopifyService,
   syncService,
   type CoreContext,
 } from "@sandalez/core";
@@ -68,6 +69,12 @@ export async function syncJob(ctx: CoreContext, days = 7) {
   });
 }
 
+/** Every 30 minutes when Shopify is connected: new and changed orders, their outcome and their ad. */
+export async function shopSyncJob(ctx: CoreContext) {
+  if (!shopifyService.shopifyConfigured(ctx)) return { job: "shop_sync", ok: true, skipped: "Shopify not configured", ms: 0 } as JobResult;
+  return runJob(ctx, "shop_sync", () => shopifyService.syncShopOrders(ctx));
+}
+
 export async function alertsJob(ctx: CoreContext) {
   return runJob(ctx, "alerts", () => alertsService.evaluateAlerts(ctx));
 }
@@ -76,6 +83,9 @@ export async function alertsJob(ctx: CoreContext) {
 export async function weeklyReportJob(ctx: CoreContext) {
   return runJob(ctx, "weekly_report", async () => {
     const settings = await settingsService.getSettings(ctx);
+    if (shopifyService.shopifyConfigured(ctx)) {
+      await shopifyService.syncShopOrders(ctx).catch((err) => ctx.log.warn({ err: String(err) }, "Shopify sync before the report failed"));
+    }
     return reportsService.weeklyReport(ctx, { send_email: emailConfigured() && Boolean(settings.alertEmail) });
   });
 }

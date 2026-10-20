@@ -26,6 +26,10 @@ export * as catalogService from "./services/catalog.js";
 export * as webhooksService from "./services/webhooks.js";
 export * as dashboardService from "./services/dashboard.js";
 export * as settingsService from "./services/settings.js";
+export * as shopifyService from "./services/shopify.js";
+export * as reviewService from "./services/review.js";
+export * as editingService from "./services/editing.js";
+export * as commentsService from "./services/comments.js";
 export { createCtwaCampaign } from "./services/ctwa.js";
 export {
   appsForCreative,

@@ -12,7 +12,7 @@ The tool manages only your own ad account, so the default **Marketing API Access
 4. Add the **Marketing API** product to the app (grants Limited access to `ads_management` and `ads_read`).
 5. **Business Settings → System users:** create one **admin** system user (the Limited tier allows 1 system user + 1 admin system user).
 6. Assign the system user to the **ad account** (Manage campaigns), the **Page** (Advertise / create ads), the **pixel** and the **catalog**.
-7. **Generate a token** for the app with: `ads_management`, `ads_read`, `business_management`, `pages_show_list`, `pages_read_engagement`, `pages_manage_ads` (+ `catalog_management` for catalog ads). Pick "never expires".
+7. **Generate a token** for the app with: `ads_management`, `ads_read`, `business_management`, `pages_show_list`, `pages_read_engagement`, `pages_manage_ads` (+ `catalog_management` for catalog ads; + `pages_read_user_content`, `pages_manage_engagement`, `instagram_basic` and `instagram_manage_comments` to read and hide ad comments). Pick "never expires".
 8. Put these into the server's `.env` (never into code):
 
    | Variable | Where to find it |
@@ -33,7 +33,7 @@ Then run `pnpm setup:check --env .env`. It checks the token (valid, permissions,
 
 ## Optional integrations
 
-**WhatsApp Cloud API webhook** (auto-counts chats per ad from click-to-WhatsApp referrals):
+**WhatsApp Cloud API webhook** (auto-counts chats per ad from click-to-WhatsApp referrals; full steps, with Shopify orders, in [orders.md](orders.md)):
 
 - App → WhatsApp → Configuration → Webhook URL `https://<DOMAIN>/webhooks/whatsapp`, verify token = `WHATSAPP_WEBHOOK_VERIFY_TOKEN`. Subscribe to `messages`.
 - Requests are verified with `X-Hub-Signature-256` using `META_APP_SECRET`.

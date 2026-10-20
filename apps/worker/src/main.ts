@@ -1,6 +1,6 @@
 import cron from "node-cron";
 import { createCore, logger } from "@sandalez/core";
-import { alertsJob, syncJob, tokenCheckJob, weeklyReportJob } from "./jobs/index.js";
+import { alertsJob, shopSyncJob, syncJob, tokenCheckJob, weeklyReportJob } from "./jobs/index.js";
 
 const core = createCore();
 const ctx = core.context("worker", "worker");
@@ -12,6 +12,7 @@ const schedules: [string, string, () => Promise<unknown>][] = [
   ["alerts", process.env.ALERTS_CRON ?? "15 */3 * * *", () => alertsJob(ctx)],
   ["weekly_report", process.env.WEEKLY_REPORT_CRON ?? "0 9 * * 1", () => weeklyReportJob(ctx)],
   ["token_check", process.env.TOKEN_CHECK_CRON ?? "0 8 * * *", () => tokenCheckJob(ctx)],
+  ["shop_sync", process.env.SHOP_SYNC_CRON ?? "*/30 * * * *", () => shopSyncJob(ctx)],
 ];
 
 for (const [name, expr, fn] of schedules) {
@@ -28,6 +29,7 @@ async function startupSync(attempt = 1): Promise<void> {
 }
 if (process.env.RUN_SYNC_ON_START !== "false") void startupSync();
 void tokenCheckJob(ctx);
+void shopSyncJob(ctx);
 
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
   process.on(sig, () => {

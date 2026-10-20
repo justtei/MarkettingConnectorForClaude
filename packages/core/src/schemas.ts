@@ -314,9 +314,28 @@ export const insightsInput = z.object({
   level: z.enum(["account", "campaign", "adset", "ad"]).default("campaign"),
   ...dateRange.shape,
   breakdowns: z
-    .array(z.enum(["age", "gender", "publisher_platform", "platform_position", "region", "device_platform"]))
+    .array(
+      z.enum([
+        "age",
+        "gender",
+        "publisher_platform",
+        "platform_position",
+        "region",
+        "device_platform",
+        "body_asset",
+        "title_asset",
+        "description_asset",
+        "video_asset",
+        "image_asset",
+        "call_to_action_asset",
+      ]),
+    )
     .max(2)
-    .optional(),
+    .optional()
+    .describe(
+      "Split the numbers. *_asset breakdowns show which text, headline, video, image or button wins when an ad runs several " +
+        "versions (text versions, multi-app buttons, dynamic creative); use one asset breakdown at a time, at level ad.",
+    ),
   time_increment: z.union([z.literal("all_days"), z.literal("monthly"), z.number().int().min(1).max(90)]).optional(),
   limit: z.number().int().min(1).max(500).default(100),
 });
@@ -346,4 +365,5 @@ export const costPerOrderInput = z.object({
   ...dateRange.shape,
   group_by: z.enum(["total", "day", "ad"]).default("total"),
   source: z.enum(["meta", "db"]).default("meta").describe("Spend from Meta live (default) or the synced database."),
+  object_id: metaId.optional().describe("Only this campaign, ad set or ad (orders linked to its ads). Omit for the whole account."),
 });

@@ -1,7 +1,8 @@
 // Sandalez Ads Tool — database schema.
 // Spec tables: Campaign, AdSet, Ad, Creative, DailyStat, OrderLog, Alert, AuditLog.
 // Supporting tables: User (dashboard login), Setting (editable caps), Asset (uploaded media),
-// AlertEvent (fired alerts), WhatsappChat (Cloud API webhook), Report (weekly reports).
+// AlertEvent (fired alerts), WhatsappChat (Cloud API webhook), Report (weekly reports),
+// ShopOrder (orders synced from Shopify, linked to the ad that brought the customer).
 
 generator client {
   provider      = "prisma-client-js"
@@ -56,6 +57,7 @@ model Ad {
   stats           DailyStat[]
   orders          OrderLog[]
   chats           WhatsappChat[]
+  shopOrders      ShopOrder[]
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
 
@@ -206,4 +208,28 @@ model Report {
   html      String
   emailedTo String?
   createdAt DateTime @default(now())
+}
+
+model ShopOrder {
+  id          String    @id // Shopify order ID (legacyResourceId)
+  name        String // e.g. #1042
+  createdAt   DateTime // when the customer ordered
+  date        DateTime  @db.Date // order date in the account time zone
+  updatedAt   DateTime // Shopify's updatedAt, for incremental sync
+  phone       String? // normalized 92XXXXXXXXXX
+  total       Int // PKR
+  currency    String    @default("PKR")
+  status      String // pending | delivered | refused | cancelled
+  financial   String? // Shopify displayFinancialStatus
+  fulfillment String? // Shopify displayFulfillmentStatus
+  tags        String[]
+  adId        String?
+  ad          Ad?       @relation(fields: [adId], references: [id], onDelete: SetNull)
+  attribution String? // whatsapp_chat | manual
+  chatAt      DateTime? // the WhatsApp chat the order was linked to
+  syncedAt    DateTime  @default(now()) @updatedAt
+
+  @@index([date])
+  @@index([phone])
+  @@index([adId])
 }

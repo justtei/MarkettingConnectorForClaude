@@ -244,6 +244,37 @@ else {
   report(val("REPORT_EMAIL_TO") ? "ok" : "warn", "REPORT_EMAIL_TO", val("REPORT_EMAIL_TO") || "missing; nobody receives the report");
 }
 
+// ------------------------------------------------------------------ 4b. Shopify orders (optional)
+heading("4b. Shopify orders (cost per order from real sales)");
+if (!val("SHOPIFY_STORE_DOMAIN") && !val("SHOPIFY_ADMIN_TOKEN")) {
+  report("skip", "Shopify", "not configured; orders come only from log_orders (docs/orders.md)");
+} else if (!val("SHOPIFY_STORE_DOMAIN") || !val("SHOPIFY_ADMIN_TOKEN")) {
+  report("fail", "Shopify", "set both SHOPIFY_STORE_DOMAIN and SHOPIFY_ADMIN_TOKEN");
+} else {
+  await check("Shopify Admin API", async () => {
+    const domain = val("SHOPIFY_STORE_DOMAIN").replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+    const version = val("SHOPIFY_API_VERSION") || "2026-07";
+    const r = await fetch(`${val("SHOPIFY_BASE_URL") || `https://${domain}`}/admin/api/${version}/graphql.json`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-shopify-access-token": val("SHOPIFY_ADMIN_TOKEN") },
+      body: JSON.stringify({ query: "{ shop { name } orders(first: 1) { nodes { name phone } } }" }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    const body: any = await r.json().catch(() => ({}));
+    if (r.status === 401 || r.status === 403) throw new Error(`the token was refused (HTTP ${r.status}); check SHOPIFY_ADMIN_TOKEN`);
+    if (body.errors) {
+      const msg = JSON.stringify(body.errors);
+      if (/read_orders|access denied/i.test(msg)) throw new Error("the app needs the read_orders scope");
+      throw new Error(msg.slice(0, 200));
+    }
+    const first = body.data?.orders?.nodes?.[0];
+    if (first && first.phone === null) {
+      return { status: "warn", detail: `${body.data.shop.name}: connected, but phone numbers are hidden. Turn on protected customer data (phone) for the app, or orders can't be linked to ads.` };
+    }
+    return `${body.data?.shop?.name ?? domain}: connected, orders readable`;
+  });
+}
+
 // ------------------------------------------------------------------ 5. running services (optional)
 const mcpUrl = flag("mcp");
 const apiUrl = flag("api");

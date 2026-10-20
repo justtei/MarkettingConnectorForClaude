@@ -2,7 +2,7 @@
 
 A Node.js/TypeScript backend for Meta's Marketing API, scoped to the Sandalez ad account only. It is exposed two ways:
 
-- **an MCP server** that Claude drives from chat (44 tools), and
+- **an MCP server** that Claude drives from chat (52 tools), and
 - **a web dashboard** (mobile-first) for the owner and staff.
 
 Both are thin layers over one core package. That core is the only code that holds the Meta token and calls Meta, so the safety rules and the audit log apply to every change.
@@ -26,6 +26,7 @@ Browser ─HTTPS─► apps/web ─► apps/api ─┘      │
 | Get the Meta token and IDs | [docs/meta-setup.md](docs/meta-setup.md) |
 | Connect Claude (claude.ai, Claude Code) | [docs/connect-claude.md](docs/connect-claude.md) |
 | Learn what to ask Claude, and the dashboard | [docs/usage.md](docs/usage.md) |
+| Track real sales: Shopify orders and WhatsApp chats linked to ads (cost per delivered order) | [docs/orders.md](docs/orders.md) |
 | Logs, restarts, users, jobs, database backup and restore | [docs/commands.md](docs/commands.md) |
 
 ### What you need
@@ -63,7 +64,7 @@ claude mcp add --scope user --transport http sandalez-ads http://localhost:3001/
 | `apps/api` | Fastify REST API for the dashboard, plus signed webhooks (WhatsApp Cloud API, Shopify → Conversions API) |
 | `apps/web` | Next.js dashboard: Overview, Campaigns, Ad detail, New campaign wizard, Orders, Creatives, Insights, Audiences, Alerts, Activity log, Settings |
 | `apps/worker` | Cron jobs: sync, alerts, weekly report email, token check (lease-locked, safe to run twice) |
-| `docs/` | [Laptop setup](docs/local-laptop.md), [Windows without Docker](docs/windows-native.md), [VPS deployment](docs/deploy.md), [Meta setup](docs/meta-setup.md), [connecting Claude](docs/connect-claude.md), [usage](docs/usage.md), [commands](docs/commands.md), [tool reference](docs/mcp-tools.md) |
+| `docs/` | [Laptop setup](docs/local-laptop.md), [Windows without Docker](docs/windows-native.md), [VPS deployment](docs/deploy.md), [Meta setup](docs/meta-setup.md), [connecting Claude](docs/connect-claude.md), [usage](docs/usage.md), [orders](docs/orders.md), [commands](docs/commands.md), [tool reference](docs/mcp-tools.md) |
 | `docker-compose.yml` | VPS stack with Caddy (HTTPS); `docker-compose.local.yml` is the laptop overlay (localhost only, optional Cloudflare Tunnel); `docker-compose.demo.yml` runs against the Meta mock |
 
 ## Safety rules (enforced in `packages/core/src/guards.ts`)
@@ -108,7 +109,7 @@ docker compose -f docker-compose.yml -f docker-compose.demo.yml --env-file .env.
 ## Tests
 
 ```bash
-pnpm test        # 205 tests: core units, MCP end-to-end over HTTP + stdio, REST API, worker, setup scripts
+pnpm test        # 224 tests: core units, MCP end-to-end over HTTP + stdio, REST API, worker, setup scripts
 pnpm test:e2e    # Playwright UI flows (desktop + mobile) against a running stack
 pnpm typecheck
 ```

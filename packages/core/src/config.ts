@@ -31,6 +31,20 @@ const envSchema = z.object({
   /** Video processing wait before a creative can use it. */
   META_VIDEO_READY_TIMEOUT_MS: z.coerce.number().int().min(0).default(180_000),
 
+  /** Shopify order sync (optional): the store's myshopify.com domain and an Admin API access token (shpat_...). */
+  SHOPIFY_STORE_DOMAIN: optionalString.transform((v) => v?.replace(/^https?:\/\//, "").replace(/\/.*$/, "")),
+  SHOPIFY_ADMIN_TOKEN: optionalString,
+  SHOPIFY_API_VERSION: z
+    .string()
+    .regex(/^\d{4}-\d{2}$/, "SHOPIFY_API_VERSION must look like 2026-07")
+    .default("2026-07"),
+  /** Tests point this at the mock; normally https://<SHOPIFY_STORE_DOMAIN>. */
+  SHOPIFY_BASE_URL: optionalString,
+  /** Order tags that mean the customer refused the parcel (COD return), comma-separated, case-insensitive. */
+  SHOPIFY_REFUSED_TAGS: z.string().default("refused,rto,returned,return to origin,cod refused"),
+  /** How far back a WhatsApp chat from an ad still counts for an order from the same phone number. */
+  ORDER_ATTRIBUTION_DAYS: z.coerce.number().int().min(1).max(90).default(28),
+
   MAX_DAILY_BUDGET_PKR: z.coerce.number().positive().default(2000),
   MAX_BUDGET_INCREASE_PCT: z.coerce.number().positive().default(30),
   DEFAULT_TIMEZONE: z.string().default("Asia/Karachi"),

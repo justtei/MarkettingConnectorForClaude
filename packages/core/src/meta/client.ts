@@ -142,6 +142,10 @@ export class MetaClient {
     if (!sp.has("access_token")) {
       sp.set("access_token", this.opts.accessToken);
       if (this.proof) sp.set("appsecret_proof", this.proof);
+    } else if (this.opts.appSecret && !sp.get("access_token")!.includes("|")) {
+      // A Page token gets its own proof (apps that require app-secret proofs refuse calls without one).
+      // App tokens (app_id|secret) take none.
+      sp.set("appsecret_proof", createHmac("sha256", this.opts.appSecret).update(sp.get("access_token")!).digest("hex"));
     }
     return sp;
   }

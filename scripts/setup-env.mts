@@ -113,7 +113,7 @@ const stillEmpty = [...finalText.matchAll(/^([A-Z0-9_]+)=(.*)$/gm)]
 console.log(`Wrote ${out}`);
 console.log(`  generated/set: ${filled.join(", ") || "nothing (all already set)"}`);
 if (kept.length) console.log(`  kept existing: ${kept.length} value(s)`);
-const optional = /^(META_CAPI_TEST_EVENT_CODE|MCP_IP_ALLOWLIST|SHOPIFY_WEBHOOK_SECRET|SMTP_.*|CLOUDFLARE_TUNNEL_TOKEN|DASHBOARD_URL)$/;
+const optional = /^(META_CAPI_TEST_EVENT_CODE|MCP_IP_ALLOWLIST|SHOPIFY_WEBHOOK_SECRET|SHOPIFY_STORE_DOMAIN|SHOPIFY_ADMIN_TOKEN|SMTP_.*|CLOUDFLARE_TUNNEL_TOKEN|DASHBOARD_URL)$/;
 console.log(`  still to fill (required): ${stillEmpty.filter((k) => !optional.test(k)).join(", ") || "nothing"}`);
 console.log(`  optional, empty: ${stillEmpty.filter((k) => optional.test(k)).join(", ") || "none"}`);
 console.log(`Next: fill the Meta values (docs/meta-setup.md), then run: pnpm setup:check --env ${outName}`);

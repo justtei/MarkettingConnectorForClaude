@@ -4,18 +4,40 @@ import { audited } from "../audit.js";
 import type { CoreContext } from "../context.js";
 import { sendEmail } from "../email.js";
 import { resolveOwnedObject, UserInputError } from "../guards.js";
-import { todayIn } from "../util/dates.js";
+import { addDays, todayIn } from "../util/dates.js";
+import { accountWarnings } from "./account.js";
+import { rejectedAds } from "./review.js";
 import { fetchInsights, levelFor, totalsOf } from "./insights.js";
+import { getCostPerOrder } from "./orders.js";
 import { getSettings } from "./settings.js";
 
-export const alertMetric = z.enum(["cost_per_chat", "spend", "frequency", "ctr", "spend_stopped"]);
+export const alertMetric = z.enum([
+  "cost_per_chat",
+  "spend",
+  "frequency",
+  "ctr",
+  "spend_stopped",
+  "cost_per_order",
+  "refusal_rate",
+  "roas",
+  "ad_rejected",
+  "account_problem",
+]);
+
+/** Metrics that need no threshold: they fire on an event. */
+const EVENT_METRICS = new Set(["spend_stopped", "ad_rejected", "account_problem"]);
+/** Order metrics look at the last 7 days: COD orders settle days after the click. */
+const ORDER_METRICS = new Set(["cost_per_order", "refusal_rate", "roas"]);
 
 export const setAlertInput = z.object({
   metric: alertMetric.describe(
-    "cost_per_chat (PKR, today), spend (PKR, today), frequency (last 7 days), ctr (% today), spend_stopped (no spend today by noon while campaigns are active)",
+    "cost_per_chat (PKR, today), spend (PKR, today), frequency (last 7 days), ctr (% today), spend_stopped (no spend today by noon " +
+      "while campaigns are active), cost_per_order (PKR, last 7 days), refusal_rate (% of settled orders refused, last 7 days), " +
+      "roas (delivered revenue / spend, last 7 days), ad_rejected (an ad is disapproved or has issues; fires once per ad), " +
+      "account_problem (account disabled, unpaid, or spend limit reached)",
   ),
   operator: z.enum(["gt", "lt"]).default("gt"),
-  threshold: z.number().min(0).default(0),
+  threshold: z.number().min(0).optional().describe("Needed for every metric except spend_stopped, ad_rejected and account_problem."),
   object_id: z.string().regex(/^\d+$/).optional().describe("Campaign/ad set/ad; omit for the whole account."),
   name: z.string().max(200).optional(),
 });
@@ -27,6 +49,8 @@ function describeAlert(a: { metric: string; operator: string; threshold: Prisma.
   const op = a.operator === "gt" ? "above" : "below";
   const scope = a.objectId ? ` for ${a.objectId}` : "";
   if (a.metric === "spend_stopped") return `Spend stopped${scope}`;
+  if (a.metric === "ad_rejected") return `Ad rejected${scope}`;
+  if (a.metric === "account_problem") return "Ad account problem";
   return `${a.metric.replace(/_/g, " ")} ${op} ${Number(a.threshold)}${scope}`;
 }
 
@@ -46,13 +70,17 @@ function serialize(a: any) {
 
 export async function setAlert(ctx: CoreContext, raw: z.input<typeof setAlertInput>) {
   const input = setAlertInput.parse(raw);
+  if (!EVENT_METRICS.has(input.metric) && input.threshold === undefined) {
+    throw new UserInputError(`Give a threshold for ${input.metric} (e.g. cost_per_order gt 900, refusal_rate gt 25, roas lt 2).`);
+  }
+  if (input.metric === "account_problem" && input.object_id) throw new UserInputError("account_problem is for the whole account; leave object_id out.");
   if (input.object_id) await resolveOwnedObject(ctx, input.object_id);
   return audited(ctx, "set_alert", { request: input }, async () => {
     const a = await ctx.db.alert.create({
       data: {
         metric: input.metric,
         operator: input.operator,
-        threshold: new Prisma.Decimal(input.threshold),
+        threshold: new Prisma.Decimal(input.threshold ?? 0),
         objectId: input.object_id ?? null,
         name: input.name ?? null,
       },
@@ -116,13 +144,72 @@ export async function recentAlertEvents(ctx: CoreContext, limit = 50) {
 export async function evaluateAlerts(ctx: CoreContext, now = new Date()) {
   const alerts = await ctx.db.alert.findMany({ where: { active: true } });
   const fired: { alert_id: string; message: string; value: number }[] = [];
+  const fire = async (a: { id: string; objectId: string | null }, value: number, message: string, objectId = a.objectId) => {
+    await ctx.db.alertEvent.create({ data: { alertId: a.id, value: new Prisma.Decimal(value), message, objectId } });
+    await ctx.db.alert.update({ where: { id: a.id }, data: { lastTriggeredAt: now } });
+    fired.push({ alert_id: a.id, message, value });
+  };
+  const orderCache = new Map<string, Awaited<ReturnType<typeof getCostPerOrder>>>();
   const cache = new Map<string, Awaited<ReturnType<typeof metricsFor>>>();
   const tz = ctx.config.DEFAULT_TIMEZONE;
   const hour = Number(new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", hour12: false }).format(now));
 
   for (const a of alerts) {
     if (a.mutedUntil && a.mutedUntil > now) continue;
+    // Rejections fire once per ad, so they skip the cooldown (a second rejected ad must not wait 6 hours).
+    if (a.metric === "ad_rejected") {
+      try {
+        for (const ad of await rejectedAds(ctx, a.objectId)) {
+          const seen = await ctx.db.alertEvent.findFirst({ where: { alertId: a.id, objectId: ad.id } });
+          if (seen) continue;
+          await fire(a, 1, `Ad rejected: "${ad.name}" (${ad.id}) is ${ad.status}. ${ad.reasons.join(" ") || "Open it in Ads Manager for details."}`, ad.id);
+        }
+      } catch (err) {
+        ctx.log.warn({ err: String(err), alert: a.id }, "Could not check for rejected ads");
+      }
+      continue;
+    }
     if (a.lastTriggeredAt && now.getTime() - a.lastTriggeredAt.getTime() < COOLDOWN_MS) continue;
+    if (a.metric === "account_problem") {
+      try {
+        const problems = (await accountWarnings(ctx)).filter((w) => w.severity === "critical");
+        if (problems.length) await fire(a, problems.length, `Ad account problem: ${problems.map((p) => p.message).join(" ")}`);
+      } catch (err) {
+        ctx.log.warn({ err: String(err), alert: a.id }, "Could not check the ad account");
+      }
+      continue;
+    }
+    if (ORDER_METRICS.has(a.metric)) {
+      const key = a.objectId ?? "account";
+      let o = orderCache.get(key);
+      if (!o) {
+        try {
+          // The last 7 days including today (Meta's last_7d stops yesterday; today's orders matter here).
+          const today = todayIn(ctx.config.DEFAULT_TIMEZONE);
+          o = await getCostPerOrder(ctx, { since: addDays(today, -6), until: today, object_id: a.objectId ?? undefined, source: "meta" });
+        } catch (err) {
+          ctx.log.warn({ err: String(err), alert: a.id }, "Order metrics unavailable");
+          continue;
+        }
+        orderCache.set(key, o);
+      }
+      const t = o.total;
+      const threshold = Number(a.threshold);
+      // Spend with no orders yet counts as an infinite cost per order once it passes the threshold.
+      const value =
+        a.metric === "cost_per_order"
+          ? t.cost_per_order ?? (t.spend > threshold ? t.spend : null)
+          : a.metric === "refusal_rate"
+            ? t.refusal_rate_pct
+            : t.roas_delivered;
+      if (value === null || (a.metric === "roas" && t.spend === 0)) continue;
+      const hit = a.operator === "gt" ? value > threshold : value < threshold;
+      if (hit) {
+        const unit = a.metric === "cost_per_order" ? ` (PKR ${Math.round(t.spend)} spent, ${t.orders} order(s))` : a.metric === "refusal_rate" ? `% (${t.refused} refused)` : "x";
+        await fire(a, value, `${describeAlert(a)} — last 7 days: ${value}${unit}`);
+      }
+      continue;
+    }
     const key = a.objectId ?? "account";
     let m = cache.get(key);
     if (!m) {
@@ -163,9 +250,7 @@ export async function evaluateAlerts(ctx: CoreContext, now = new Date()) {
       a.metric === "spend_stopped"
         ? `No spend today (${todayIn(tz)}) although ${m.activeCampaigns} campaign(s) are active. Check payment method, ad approval and budgets.`
         : `${describeAlert(a)} — current value ${value}`;
-    await ctx.db.alertEvent.create({ data: { alertId: a.id, value: new Prisma.Decimal(value), message, objectId: a.objectId } });
-    await ctx.db.alert.update({ where: { id: a.id }, data: { lastTriggeredAt: now } });
-    fired.push({ alert_id: a.id, message, value });
+    await fire(a, value, message);
   }
 
   if (fired.length) {

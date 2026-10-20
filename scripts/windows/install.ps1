@@ -214,6 +214,8 @@ if ($Funnel) {
     Write-Host $out
     Fail "Funnel isn't enabled for this tailnet yet. Open the link above (or https://login.tailscale.com/admin/settings/features), enable HTTPS and Funnel, then run this again with -Funnel."
   }
+  # Signed webhooks (WhatsApp chats -> ads, Shopify) go to the API; everything else on 443 is the MCP server.
+  & $Tailscale funnel --bg --yes --set-path=/webhooks http://127.0.0.1:3002/webhooks 2>&1 | Out-Null
   & $Tailscale serve --bg --yes --https=8443 3000 2>&1 | Out-Null
   Set-EnvValue "DASHBOARD_URL" "https://${dns}:8443"
   Set-EnvValue "AUTH_URL" "https://${dns}:8443"
@@ -221,6 +223,7 @@ if ($Funnel) {
   Set-EnvValue "DOMAIN" "${dns}:8443"
   Ok "MCP (public):        https://$dns/mcp"
   Ok "dashboard (tailnet): https://${dns}:8443"
+  Ok "webhooks (public):   https://$dns/webhooks/whatsapp  (docs/orders.md)"
 }
 
 # ------------------------------------------------------------------ services

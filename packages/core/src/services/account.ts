@@ -30,20 +30,74 @@ export function clearCurrencyCache(): void {
   currencyCache.clear();
 }
 
+/** Meta's ad account disable_reason codes. */
+const DISABLE_REASON: Record<number, string> = {
+  1: "ad policy (integrity) violation",
+  2: "intellectual property review",
+  3: "payment risk (failed or suspicious payment)",
+  4: "account shut down",
+  5: "advertiser review",
+  6: "business integrity review",
+  7: "permanently closed",
+  8: "unused reseller account",
+  9: "unused account",
+  10: "umbrella account",
+  11: "business manager integrity policy",
+  12: "misrepresented ad account",
+  13: "ad account policy review",
+};
+
+const ACCOUNT_FIELDS =
+  "id,account_id,name,currency,timezone_name,account_status,disable_reason,amount_spent,spend_cap,balance,business_name";
+
+export type AccountWarning = { severity: "critical" | "warning"; code: string; message: string };
+
+/** Problems that stop or will stop delivery: disabled, unpaid, in review, spend limit reached, rejected ads. */
+export function warningsFor(a: any, rejected = 0): AccountWarning[] {
+  const cur = String(a.currency ?? "PKR");
+  const out: AccountWarning[] = [];
+  const status = Number(a.account_status);
+  const reason = DISABLE_REASON[Number(a.disable_reason)];
+  if (status === 2) out.push({ severity: "critical", code: "disabled", message: `The ad account is disabled${reason ? ` (${reason})` : ""}. Request a review in Account Quality.` });
+  if (status === 3) out.push({ severity: "critical", code: "payment_failed", message: "A payment failed (account unsettled): nothing delivers until the balance is paid in Billing." });
+  if (status === 9) out.push({ severity: "critical", code: "grace_period", message: "A payment failed; ads run for a short grace period. Fix the payment method in Billing." });
+  if (status === 7) out.push({ severity: "warning", code: "risk_review", message: "The account is in a payment risk review." });
+  if (status === 8) out.push({ severity: "warning", code: "pending_settlement", message: "A payment is being settled." });
+  if (status === 100 || status === 101) out.push({ severity: "critical", code: "closed", message: "The ad account is closed or closing." });
+  const cap = fromMinorUnits(a.spend_cap, cur);
+  const spent = fromMinorUnits(a.amount_spent, cur);
+  if (cap && cap > 0 && spent !== null) {
+    if (spent >= cap) out.push({ severity: "critical", code: "spend_cap_reached", message: `The account spending limit (${cur} ${cap}) is reached: raise or reset it in Billing.` });
+    else if (spent >= cap * 0.9) out.push({ severity: "warning", code: "spend_cap_near", message: `${Math.round((spent / cap) * 100)}% of the account spending limit (${cur} ${cap}) is used.` });
+  }
+  if (rejected > 0) out.push({ severity: "warning", code: "ads_rejected", message: `${rejected} ad(s) are disapproved or have issues (get_campaign_tree shows the reasons).` });
+  return out;
+}
+
+export async function accountWarnings(ctx: CoreContext): Promise<AccountWarning[]> {
+  const a = await ctx.meta.get<any>(ctx.config.META_AD_ACCOUNT_ID, { fields: ACCOUNT_FIELDS });
+  return warningsFor(a);
+}
+
 export async function getAccount(ctx: CoreContext) {
-  const a = await ctx.meta.get<any>(ctx.config.META_AD_ACCOUNT_ID, {
-    fields: "id,account_id,name,currency,timezone_name,account_status,disable_reason,amount_spent,spend_cap,balance,business_name",
-  });
+  const [a, rejected] = await Promise.all([
+    ctx.meta.get<any>(ctx.config.META_AD_ACCOUNT_ID, { fields: ACCOUNT_FIELDS }),
+    ctx.meta
+      .getAll<any>(`${ctx.config.META_AD_ACCOUNT_ID}/ads`, { fields: "id", effective_status: ["DISAPPROVED", "WITH_ISSUES"] }, 500)
+      .then((r) => r.length)
+      .catch(() => 0),
+  ]);
   currencyCache.set(ctx.config.META_AD_ACCOUNT_ID, a.currency);
   const cur = a.currency as string;
   return {
+    warnings: warningsFor(a, rejected),
     id: a.id as string,
     name: a.name as string,
     business_name: a.business_name ?? null,
     currency: cur,
     timezone: a.timezone_name as string,
     status: ACCOUNT_STATUS[a.account_status] ?? String(a.account_status),
-    disable_reason: a.disable_reason ?? null,
+    disable_reason: a.disable_reason ? DISABLE_REASON[Number(a.disable_reason)] ?? String(a.disable_reason) : null,
     amount_spent: fromMinorUnits(a.amount_spent, cur),
     spend_cap: a.spend_cap && a.spend_cap !== "0" ? fromMinorUnits(a.spend_cap, cur) : null,
     balance: fromMinorUnits(a.balance, cur),

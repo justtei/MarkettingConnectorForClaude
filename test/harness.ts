@@ -15,7 +15,7 @@ export const MCP_PATH_SECRET = "test-path-secret-0123456789abcdefgh";
 export async function resetDb() {
   const db = getDb();
   await db.$executeRawUnsafe(
-    'TRUNCATE "AlertEvent","Alert","AuditLog","OrderLog","WhatsappChat","DailyStat","Ad","Creative","AdSet","Campaign","Asset","Setting","User","Report" CASCADE',
+    'TRUNCATE "AlertEvent","Alert","AuditLog","OrderLog","ShopOrder","WhatsappChat","DailyStat","Ad","Creative","AdSet","Campaign","Asset","Setting","User","Report" CASCADE',
   );
 }
 

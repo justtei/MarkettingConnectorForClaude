@@ -110,8 +110,17 @@ export function parseInsightRow(r: any, breakdowns: string[] = []): InsightRow {
   for (const k of ["campaign_id", "campaign_name", "adset_id", "adset_name", "ad_id", "ad_name"] as const) {
     if (r[k] !== undefined) (row as any)[k] = r[k];
   }
-  if (breakdowns.length) row.breakdown = Object.fromEntries(breakdowns.map((b) => [b, String(r[b] ?? "unknown")]));
+  if (breakdowns.length) row.breakdown = Object.fromEntries(breakdowns.map((b) => [b, breakdownValue(r[b])]));
   return row;
+}
+
+/** Asset breakdowns come back as objects ({ id, text } for texts, { id, video_id / hash, url } for media, { id, name } for buttons). */
+function breakdownValue(v: unknown): string {
+  if (v === undefined || v === null) return "unknown";
+  if (typeof v !== "object") return String(v);
+  const o = v as Record<string, unknown>;
+  const label = o.text ?? o.name ?? o.video_id ?? o.hash ?? o.url ?? o.id;
+  return label === undefined ? JSON.stringify(v) : String(label);
 }
 
 export function totalsOf(rows: InsightRow[]) {

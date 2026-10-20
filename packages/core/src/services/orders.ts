@@ -1,7 +1,7 @@
 import type { z } from "zod";
 import { audited } from "../audit.js";
 import type { CoreContext } from "../context.js";
-import { GuardError, UserInputError } from "../guards.js";
+import { GuardError, resolveOwnedObject, UserInputError } from "../guards.js";
 import { logOrdersInput, type costPerOrderInput, type orderPatchInput } from "../schemas.js";
 import { eachDay, fromDbDate, resolveRange, toDbDate } from "../util/dates.js";
 import { getCurrency } from "./account.js";
@@ -172,11 +172,19 @@ interface Bucket {
   chats: number;
   orders: number;
   refused: number;
+  /** Shopify orders not yet delivered or refused (manual log rows count as settled). */
+  pending: number;
   revenue: number;
+  revenue_delivered: number;
 }
 
+const emptyBucket = (key: string, label: string): Bucket => ({
+  key, label, spend: 0, conversations: 0, chats: 0, orders: 0, refused: 0, pending: 0, revenue: 0, revenue_delivered: 0,
+});
+
 function finish(b: Bucket) {
-  const delivered = b.orders - b.refused;
+  const delivered = b.orders - b.refused - b.pending;
+  const settled = b.orders - b.pending;
   const r = (x: number) => Math.round(x * 100) / 100;
   return {
     key: b.key,
@@ -186,14 +194,18 @@ function finish(b: Bucket) {
     chats_logged: b.chats,
     orders: b.orders,
     refused: b.refused,
+    pending: b.pending,
     delivered,
     revenue: b.revenue,
+    revenue_delivered: b.revenue_delivered,
     cost_per_chat: b.conversations ? r(b.spend / b.conversations) : null,
     cost_per_order: b.orders ? r(b.spend / b.orders) : null,
     cost_per_delivered_order: delivered > 0 ? r(b.spend / delivered) : null,
-    refusal_rate_pct: b.orders ? r((b.refused / b.orders) * 100) : null,
+    // Refusals out of orders whose outcome is known (pending ones would hide refusals still to come).
+    refusal_rate_pct: settled > 0 ? r((b.refused / settled) * 100) : null,
     chat_to_order_pct: b.chats ? r((b.orders / b.chats) * 100) : null,
     roas: b.spend ? r(b.revenue / b.spend) : null,
+    roas_delivered: b.spend ? r(b.revenue_delivered / b.spend) : null,
   };
 }
 
@@ -206,11 +218,14 @@ export async function getCostPerOrder(ctx: CoreContext, input: z.input<typeof co
   const bucket = (key: string, label: string) => {
     let b = buckets.get(key);
     if (!b) {
-      b = { key, label, spend: 0, conversations: 0, chats: 0, orders: 0, refused: 0, revenue: 0 };
+      b = emptyBucket(key, label);
       buckets.set(key, b);
     }
     return b;
   };
+  // Restrict to one campaign / ad set / ad: its ads (from the mirror) and its own insights.
+  const scope = input.object_id ? await adsUnder(ctx, input.object_id) : null;
+  const inScope = (adId: string | null) => !scope || (adId !== null && scope.adIds.has(adId));
   const keyFor = (date: string, adId: string | null) =>
     groupBy === "total" ? "total" : groupBy === "day" ? date : adId ?? "unattributed";
 
@@ -220,7 +235,8 @@ export async function getCostPerOrder(ctx: CoreContext, input: z.input<typeof co
   if (source === "meta") {
     try {
       const rows = await fetchInsights(ctx, {
-        level: groupBy === "ad" ? "ad" : "account",
+        objectId: input.object_id,
+        level: groupBy === "ad" ? "ad" : scope ? scope.level : "account",
         range,
         timeIncrement: groupBy === "day" ? 1 : "all_days",
       });
@@ -241,6 +257,7 @@ export async function getCostPerOrder(ctx: CoreContext, input: z.input<typeof co
       include: { ad: { select: { name: true } } },
     });
     for (const s of stats) {
+      if (!inScope(s.adId)) continue;
       const key = keyFor(fromDbDate(s.date), s.adId);
       const b = bucket(key, groupBy === "ad" ? s.ad.name : key);
       b.spend += Number(s.spend);
@@ -253,12 +270,43 @@ export async function getCostPerOrder(ctx: CoreContext, input: z.input<typeof co
     include: { ad: { select: { name: true } } },
   });
   for (const o of orders) {
+    if (!inScope(o.adId)) continue;
     const key = keyFor(fromDbDate(o.date), o.adId);
     const b = bucket(key, groupBy === "ad" ? o.ad?.name ?? (o.adId ? key : "Not linked to an ad") : key);
     b.chats += o.chats;
     b.orders += o.orders;
     b.refused += o.refused;
     b.revenue += o.revenue;
+    // Manual rows are entered after the fact: orders minus refused count as delivered.
+    if (o.orders > 0) b.revenue_delivered += Math.round((o.revenue * (o.orders - o.refused)) / o.orders);
+  }
+
+  // Shopify orders (cancelled before shipping don't count as orders).
+  const shop = await ctx.db.shopOrder.findMany({
+    where: { date: { gte: toDbDate(range.since), lte: toDbDate(range.until) }, status: { not: "cancelled" } },
+    include: { ad: { select: { name: true } } },
+  });
+  for (const o of shop) {
+    if (!inScope(o.adId)) continue;
+    const key = keyFor(fromDbDate(o.date), o.adId);
+    const b = bucket(key, groupBy === "ad" ? o.ad?.name ?? (o.adId ? key : "Not linked to an ad") : key);
+    b.orders += 1;
+    if (o.status === "refused") b.refused += 1;
+    else b.revenue += o.total;
+    if (o.status === "pending") b.pending += 1;
+    if (o.status === "delivered") b.revenue_delivered += o.total;
+  }
+
+  // Chats recorded by the WhatsApp webhook (click-to-WhatsApp referrals).
+  const chats = await ctx.db.whatsappChat.groupBy({
+    by: ["date", "adId"],
+    where: { date: { gte: toDbDate(range.since), lte: toDbDate(range.until) } },
+    _count: { _all: true },
+  });
+  for (const c of chats) {
+    if (!inScope(c.adId)) continue;
+    bucket(keyFor(fromDbDate(c.date), c.adId), groupBy === "ad" ? c.adId ?? "Not linked to an ad" : keyFor(fromDbDate(c.date), c.adId)).chats +=
+      c._count._all;
   }
   if (groupBy === "total") bucket("total", "total");
 
@@ -272,9 +320,11 @@ export async function getCostPerOrder(ctx: CoreContext, input: z.input<typeof co
         chats: a.chats + b.chats,
         orders: a.orders + b.orders,
         refused: a.refused + b.refused,
+        pending: a.pending + b.pending,
         revenue: a.revenue + b.revenue,
+        revenue_delivered: a.revenue_delivered + b.revenue_delivered,
       }),
-      { key: "total", label: "total", spend: 0, conversations: 0, chats: 0, orders: 0, refused: 0, revenue: 0 } as Bucket,
+      emptyBucket("total", "total"),
     ),
   );
   return {
@@ -284,6 +334,27 @@ export async function getCostPerOrder(ctx: CoreContext, input: z.input<typeof co
     currency: await getCurrency(ctx),
     total,
     rows: groupBy === "total" ? [] : rows,
-    notes: orders.length === 0 ? ["No orders logged in this period. Use log_orders to record them."] : [],
+    order_sources: { manual_rows: orders.length, shopify_orders: shop.length },
+    notes: [
+      ...(orders.length === 0 && shop.length === 0
+        ? ["No orders in this period. Connect Shopify (sync_shop_orders) or record them with log_orders."]
+        : []),
+      ...(orders.some((o) => o.orders > 0) && shop.length > 0
+        ? ["Both manual order rows and Shopify orders exist in this period; if the manual rows repeat Shopify orders they are counted twice."]
+        : []),
+      ...(shop.length > 0 && shop.filter((o) => !o.adId).length > 0
+        ? [`${shop.filter((o) => !o.adId).length} Shopify order(s) aren't linked to an ad (no click-to-WhatsApp chat from that phone). They count in the totals only.`]
+        : []),
+    ],
   };
+}
+
+/** The ads under a campaign / ad set / ad, from the DB mirror. */
+async function adsUnder(ctx: CoreContext, objectId: string) {
+  const type = await resolveOwnedObject(ctx, objectId);
+  const where =
+    type === "campaign" ? { adSet: { campaignId: objectId } } : type === "adset" ? { adSetId: objectId } : type === "ad" ? { id: objectId } : null;
+  if (!where) throw new UserInputError(`${objectId} is a ${type}; give a campaign, ad set or ad.`);
+  const ads = await ctx.db.ad.findMany({ where, select: { id: true } });
+  return { level: type as "campaign" | "adset" | "ad", adIds: new Set(ads.map((a) => a.id)) };
 }

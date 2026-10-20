@@ -23,6 +23,7 @@ import {
   mirrorCampaign,
   mirrorCreative,
 } from "./mirror.js";
+import { REVIEW_FIELDS, reviewOf } from "./review.js";
 import { getSettings } from "./settings.js";
 import { buildTargeting, validateTargetingSpec, withExplicitAdvantageAudience } from "./targeting.js";
 
@@ -279,7 +280,7 @@ const appList = (apps: MessagingApp[]) => (apps.length ? apps.map((a) => APP_LAB
  * ("The campaign destination type must be consistent with app destination in call to action").
  * Checked first so the error says exactly what to change.
  */
-async function checkCreativeFitsAdset(ctx: CoreContext, adsetId: string, creativeId: string) {
+export async function checkCreativeFitsAdset(ctx: CoreContext, adsetId: string, creativeId: string) {
   const [adset, creative] = await Promise.all([
     ctx.meta.get<any>(adsetId, { fields: "id,destination_type" }),
     ctx.meta.get<any>(creativeId, { fields: "id,object_story_spec,asset_feed_spec,call_to_action_type" }),
@@ -368,9 +369,9 @@ export async function getCampaignTree(ctx: CoreContext, campaignId: string) {
   if (type !== "campaign" && type !== "unknown") throw new UserInputError(`${campaignId} is a ${type}, not a campaign.`);
   const currency = await getCurrency(ctx);
   const [campaign, adsets, ads] = await Promise.all([
-    ctx.meta.get<any>(campaignId, { fields: CAMPAIGN_FIELDS }),
-    ctx.meta.getAll<any>(`${campaignId}/adsets`, { fields: ADSET_FIELDS }, 500),
-    ctx.meta.getAll<any>(`${campaignId}/ads`, { fields: AD_FIELDS }, 500),
+    ctx.meta.get<any>(campaignId, { fields: `${CAMPAIGN_FIELDS},issues_info` }),
+    ctx.meta.getAll<any>(`${campaignId}/adsets`, { fields: `${ADSET_FIELDS},issues_info` }, 500),
+    ctx.meta.getAll<any>(`${campaignId}/ads`, { fields: `${AD_FIELDS},${REVIEW_FIELDS}` }, 500),
   ]);
   await mirrorCampaign(ctx, campaign, currency);
   for (const s of adsets) {
@@ -388,6 +389,7 @@ export async function getCampaignTree(ctx: CoreContext, campaignId: string) {
     status: campaign.status,
     effective_status: campaign.effective_status,
     daily_budget: fromMinorUnits(campaign.daily_budget, currency),
+    issues: reviewOf(campaign)?.reasons ?? [],
     adsets: adsets.map((s) => ({
       id: s.id,
       name: s.name,
@@ -396,6 +398,12 @@ export async function getCampaignTree(ctx: CoreContext, campaignId: string) {
       daily_budget: fromMinorUnits(s.daily_budget, currency),
       optimization_goal: s.optimization_goal,
       destination_type: s.destination_type ?? null,
+      bid_strategy: s.bid_strategy ?? null,
+      bid_amount: fromMinorUnits(s.bid_amount, currency),
+      attribution_spec: s.attribution_spec ?? null,
+      start_time: s.start_time ?? null,
+      end_time: s.end_time ?? null,
+      issues: reviewOf(s)?.reasons ?? [],
       targeting: s.targeting,
       ads: ads
         .filter((a) => a.adset_id === s.id)
@@ -404,6 +412,7 @@ export async function getCampaignTree(ctx: CoreContext, campaignId: string) {
           name: a.name,
           status: a.status,
           effective_status: a.effective_status,
+          review: reviewOf(a),
           creative: a.creative
             ? { id: a.creative.id, name: a.creative.name ?? null, thumbnail_url: a.creative.thumbnail_url ?? null }
             : null,

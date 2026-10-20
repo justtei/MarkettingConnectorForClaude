@@ -63,24 +63,32 @@ Also available:
 - "Raise the Karachi budget to 700." Claude confirms first; more than +30% or above the cap is refused with the reason.
 - "Change the age range to 22–45." → `update_targeting`, after a confirmation.
 - "Pause everything except Karachi." → `bulk_update`
+- "Show me everything in the winning ad: video, text, buttons, welcome message." → `get_creative`. Its `as_new_creative` is the same ad ready to rebuild: "Make a version with a new first line" creates a new creative from it.
+- "Swap the Karachi ad to the new creative" or "Rename it" → `update_ad` (swapping on a live ad sends it back to review, so Claude confirms first).
+- "Hold cost per chat at PKR 150 while we scale" → `update_adset` with `bid_strategy: COST_CAP`, `bid_amount: 150`. Also attribution window and start / end dates; anything but a rename is confirmed first.
+- "Why was this ad rejected?" → `get_campaign_tree` shows Meta's reasons per ad; `get_account` shows account warnings (payment failed, spending limit reached, disabled).
+- "Hide the spam comments on the pearl flats ad." → `list_ad_comments`, then `hide_comment` (needs comment permissions on the token; the error says which).
+- "Which text line / video wins in this ad?" → `get_insights` with `breakdowns: ["body_asset"]` (or `title_asset`, `video_asset`, `image_asset`) at level ad.
 
 ### Orders and cost per order (COD)
 
-Meta can't see cash-on-delivery orders that come through WhatsApp. Log them daily, from Claude or from the dashboard's Orders page:
+Meta can't see cash-on-delivery orders that come through WhatsApp. Connect **Shopify** and the **WhatsApp webhook** ([orders.md](orders.md)) and every order is pulled in automatically, with its outcome (delivered, refused, on the way) and the ad it came from. Without them, log orders by hand, from Claude or from the dashboard's Orders page:
 
 > Log today: Karachi pearl flats ad, 12 chats, 5 orders, 1 refused, PKR 17,500 revenue.
 
-Then ask "**What's my real cost per order this week, by ad?**" (`get_cost_per_order`) to see which ads actually sell, not just which get chats. If the WhatsApp Cloud API webhook is set up ([meta-setup.md](meta-setup.md#optional-integrations)), chat counts fill in automatically.
+Then ask "**What's my real cost per delivered order this week, by ad?**" (`get_cost_per_order`) to see which ads actually sell, not just which get chats. `sync_shop_orders` pulls new orders right away, `list_shop_orders` shows them, and `link_shop_order` links one to an ad by hand.
 
 ### Alerts and reports
 
 - "Alert me if cost per chat goes above PKR 150." → `set_alert`. It's checked every 3 hours, shows up in the dashboard, and is emailed if SMTP is set.
+- Sales alerts (last 7 days, including today): "cost per order above PKR 900", "refusal rate above 25%", "ROAS below 2" → `cost_per_order`, `refusal_rate`, `roas`.
+- "Tell me when an ad is rejected" → `ad_rejected` (once per ad, with Meta's reason). "Tell me if the account has a problem" → `account_problem` (payment failed, spending limit reached, account disabled).
 - "Give me the weekly report." → `weekly_report`. It's also emailed every Monday at 09:00 if SMTP is set.
 - "What changed in the last few days, and who did it?" → `get_activity_log`
 
 ### Tool permissions in claude.ai
 
-Under Customize → Connectors → Sandalez Ads, set the tools that change live spend or delete (`set_status`, `update_budget`, `update_targeting`, `bulk_update`, `delete_object`) to **Needs approval** and the rest to **Always allow**. That way you also click "Allow" in Claude's UI on top of the server's own confirmation. In Claude Code, you approve each tool call unless you allow it in `/permissions`.
+Under Customize → Connectors → Sandalez Ads, set the tools that change live spend or delete (`set_status`, `update_budget`, `update_targeting`, `bulk_update`, `delete_object`, `update_ad`, `update_adset`, `hide_comment`) to **Needs approval** and the rest to **Always allow**. That way you also click "Allow" in Claude's UI on top of the server's own confirmation. In Claude Code, you approve each tool call unless you allow it in `/permissions`.
 
 The full list of tools with every parameter is in [mcp-tools.md](mcp-tools.md).
 

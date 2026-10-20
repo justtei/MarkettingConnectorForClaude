@@ -17,14 +17,30 @@ export async function weeklyReport(ctx: CoreContext, opts: { send_email?: boolea
   const prevUntil = addDays(since, -1);
   const prevSince = addDays(prevUntil, -6);
 
-  const [thisAds, prevTotals, thisOrders, prevOrders, fatigue, alerts] = await Promise.all([
+  const [thisAds, prevTotals, thisOrders, prevOrders, fatigue, alerts, byAd] = await Promise.all([
     fetchInsights(ctx, { level: "ad", range: { since, until } }),
     fetchInsights(ctx, { level: "account", range: { since: prevSince, until: prevUntil } }).then(totalsOf),
     getCostPerOrder(ctx, { since, until, source: "meta" }),
     getCostPerOrder(ctx, { since: prevSince, until: prevUntil, source: "meta" }),
     detectFatigue(ctx, { lookback_days: 14 }).catch(() => null),
     recentAlertEvents(ctx, 20),
+    getCostPerOrder(ctx, { since, until, source: "meta", group_by: "ad" }),
   ]);
+  // Ads ranked by what really matters once orders are linked to ads: cost per delivered order, then per order.
+  const salesAds = byAd.rows
+    .filter((r) => r.key !== "unattributed" && r.orders > 0 && r.spend > 0)
+    .sort((a, b) => (a.cost_per_delivered_order ?? a.cost_per_order ?? Infinity) - (b.cost_per_delivered_order ?? b.cost_per_order ?? Infinity))
+    .slice(0, 3)
+    .map((r) => ({
+      ad_id: r.key,
+      ad_name: r.label,
+      spend: r.spend,
+      orders: r.orders,
+      delivered: r.delivered,
+      refused: r.refused,
+      cost_per_order: r.cost_per_order,
+      cost_per_delivered_order: r.cost_per_delivered_order,
+    }));
   const cur = totalsOf(thisAds);
   const ranked = thisAds.filter((a) => a.spend > 0);
   const topAds = [...ranked]
@@ -48,12 +64,19 @@ export async function weeklyReport(ctx: CoreContext, opts: { send_email?: boolea
     cost_per_chat_change_pct: pct(cur.cost_per_conversation, prevTotals.cost_per_conversation),
     ctr: cur.ctr,
     orders: thisOrders.total.orders,
+    delivered: thisOrders.total.delivered,
+    pending: thisOrders.total.pending,
     refused: thisOrders.total.refused,
     revenue: thisOrders.total.revenue,
+    revenue_delivered: thisOrders.total.revenue_delivered,
     cost_per_order: thisOrders.total.cost_per_order,
     cost_per_order_change_pct: pct(thisOrders.total.cost_per_order, prevOrders.total.cost_per_order),
+    cost_per_delivered_order: thisOrders.total.cost_per_delivered_order,
+    cost_per_delivered_order_change_pct: pct(thisOrders.total.cost_per_delivered_order, prevOrders.total.cost_per_delivered_order),
     refusal_rate_pct: thisOrders.total.refusal_rate_pct,
     roas: thisOrders.total.roas,
+    roas_delivered: thisOrders.total.roas_delivered,
+    best_selling_ads: salesAds,
     top_ads: topAds,
     worst_ads: worstAds,
     fatigued_ads: fatigue?.ads.filter((a) => a.fatigued).map((a) => ({ ad_id: a.ad_id, ad_name: a.ad_name, reasons: a.reasons })) ?? [],
@@ -115,12 +138,18 @@ ${row("Spend", money(d.spend) + change(d.spend_change_pct))}
 ${row("Chats", `${d.chats}${change(d.chats_change_pct)}`)}
 ${row("Cost per chat", money(d.cost_per_chat) + change(d.cost_per_chat_change_pct))}
 ${row("CTR", `${d.ctr}%`)}
-${row("Orders", `${d.orders} (${d.refused} refused)`)}
+${row("Orders", `${d.orders} (${d.delivered} delivered, ${d.pending} on the way, ${d.refused} refused)`)}
 ${row("Cost per order", money(d.cost_per_order) + change(d.cost_per_order_change_pct))}
+${row("Cost per delivered order", money(d.cost_per_delivered_order) + change(d.cost_per_delivered_order_change_pct))}
 ${row("Refusal rate", d.refusal_rate_pct === null ? "—" : `${d.refusal_rate_pct}%`)}
-${row("Revenue", money(d.revenue))}
-${row("ROAS", d.roas === null ? "—" : `${d.roas}x`)}
+${row("Revenue (delivered)", `${money(d.revenue)} (${money(d.revenue_delivered)})`)}
+${row("ROAS (delivered)", `${d.roas === null ? "—" : `${d.roas}x`} (${d.roas_delivered === null ? "—" : `${d.roas_delivered}x`})`)}
 </table>
+<h3>Best-selling ads (lowest cost per delivered order)</h3>${
+    d.best_selling_ads.length
+      ? `<ul>${d.best_selling_ads.map((a: any) => `<li>${escapeHtml(a.ad_name ?? a.ad_id)} — ${money(a.spend)}, ${a.orders} orders (${a.delivered} delivered, ${a.refused} refused), ${money(a.cost_per_delivered_order ?? a.cost_per_order)}/order</li>`).join("")}</ul>`
+      : "<p>No orders linked to ads yet.</p>"
+  }
 <h3>Best ads (lowest cost per chat)</h3>${adList(d.top_ads)}
 <h3>Most expensive ads</h3>${adList(d.worst_ads)}
 <h3>Fatigued ads</h3>${d.fatigued_ads.length ? `<ul>${d.fatigued_ads.map((a: any) => `<li>${escapeHtml(a.ad_name ?? a.ad_id)}: ${escapeHtml(a.reasons.join(", "))}</li>`).join("")}</ul>` : "<p>None</p>"}

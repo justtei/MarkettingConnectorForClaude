@@ -68,6 +68,8 @@ const DESTINATIONS = new Set([
   "UNDEFINED",
 ]);
 const MESSAGING_APPS = ["WHATSAPP", "INSTAGRAM_DIRECT", "MESSENGER"];
+/** The Page access token returned by GET /{page-id}?fields=access_token. */
+export const PAGE_TOKEN = "mock-page-token";
 /** Fields that exist only on some node types (others answer "(#100) Tried accessing nonexisting field"). */
 const TYPE_ONLY_FIELDS: Record<string, string[]> = {
   adset_id: ["ad"],
@@ -111,6 +113,11 @@ export class MetaMock {
   regainMinutes = 0;
   calls: { method: string; path: string; version: string; signed: boolean; params: Record<string, any> }[] = [];
   pixelEvents: any[] = [];
+  /** Comments per Facebook post ID / Instagram media ID ("ig<creative id>"). Tests add them with addComment. */
+  comments = new Map<string, Record<string, any>[]>();
+  /** Shopify orders served by the Admin GraphQL mock, in Shopify's shape. Tests add them with addShopOrder. */
+  shopOrders: Record<string, any>[] = [];
+  shopToken = "shpat_mock";
   private nextId = 120210000000000;
 
   constructor(options: MockOptions = {}) {
@@ -140,12 +147,14 @@ export class MetaMock {
     this.failures = [];
     this.calls = [];
     this.pixelEvents = [];
+    this.comments.clear();
+    this.shopOrders = [];
     this.usagePct = 5;
     this.regainMinutes = 0;
     this.nextId = 120210000000000;
     const o = this.opts;
     this.put({ id: this.act, _type: "adaccount", account_id: o.accountId, name: "Sandalez", currency: "PKR", timezone_name: "Asia/Karachi", account_status: 1, amount_spent: "4567800", spend_cap: "0", balance: "0", business_name: "Sandalez" });
-    this.put({ id: o.pageId, _type: "page", name: "Sandalez", category: "Shoe Store", link: "https://facebook.com/sandalez", instagram_business_account: { id: o.igUserId, username: "sandalez_" }, tasks: ["ADVERTISE", "ANALYZE", "CREATE_CONTENT", "MANAGE"] });
+    this.put({ id: o.pageId, _type: "page", name: "Sandalez", category: "Shoe Store", link: "https://facebook.com/sandalez", instagram_business_account: { id: o.igUserId, username: "sandalez_" }, tasks: ["ADVERTISE", "ANALYZE", "CREATE_CONTENT", "MANAGE"], access_token: PAGE_TOKEN });
     this.put({ id: o.igUserId, _type: "instagram", username: "sandalez_" });
     this.put({ id: o.pixelId, _type: "pixel", name: "Sandalez Pixel", last_fired_time: new Date().toISOString(), is_unavailable: false, creation_time: "2024-01-01T00:00:00+0000" });
     this.put({ id: "888777666555444", _type: "catalog", name: "Sandalez Shopify", product_count: 86, vertical: "commerce", business: o.businessId });
@@ -252,6 +261,9 @@ export class MetaMock {
     // ---- control + media endpoints
     if (url.pathname.startsWith("/__mock/")) return this.control(url, method, req, res);
 
+    // ---- Shopify Admin GraphQL API (orders only), for the order sync
+    if (/^\/admin\/api\/\d{4}-\d{2}\/graphql\.json$/.test(url.pathname) && method === "POST") return this.shopify(req, res);
+
     const m = /^\/(v\d+\.\d+)\/(.*)$/.exec(url.pathname);
     if (!m) return this.err(res, 400, "Unknown path (missing API version)", 2635);
     const path = m[2]!.replace(/\/+$/, "");
@@ -281,11 +293,11 @@ export class MetaMock {
     const token = params.access_token;
     const appToken = `${this.opts.appId}|${this.opts.appSecret}`;
     if (!token) return this.err(res, 400, "An access token is required to request this resource.", 104);
-    if (token !== this.opts.token && !(path === "debug_token" && token === appToken)) {
+    if (token !== this.opts.token && token !== PAGE_TOKEN && !(path === "debug_token" && token === appToken)) {
       return this.err(res, 400, "Invalid OAuth access token - Cannot parse access token", 190);
     }
     if (params.appsecret_proof) {
-      const expected = (await import("node:crypto")).createHmac("sha256", this.opts.appSecret).update(this.opts.token).digest("hex");
+      const expected = (await import("node:crypto")).createHmac("sha256", this.opts.appSecret).update(String(token)).digest("hex");
       if (params.appsecret_proof !== expected) return this.err(res, 400, "Invalid appsecret_proof provided in the API argument", 100);
     }
 
@@ -337,6 +349,47 @@ export class MetaMock {
       return this.send(res, 200, { ok: true });
     }
     return this.err(res, 404, "Unknown mock control endpoint");
+  }
+
+  /** Adds a comment to a creative's Facebook post or Instagram media. Returns the comment ID. */
+  addComment(creativeId: string, platform: "facebook" | "instagram", text: string, author = "Customer"): string {
+    const key = platform === "facebook" ? `${this.opts.pageId}_${creativeId}` : `ig${creativeId}`;
+    const id = platform === "facebook" ? `${creativeId}_${this.genId()}` : this.genId();
+    const list = this.comments.get(key) ?? [];
+    list.push(
+      platform === "facebook"
+        ? { id, message: text, from: { id: "1", name: author }, created_time: new Date().toISOString(), is_hidden: false, like_count: 0, comment_count: 0, _platform: "facebook" }
+        : { id, text, username: author, timestamp: new Date().toISOString(), hidden: false, like_count: 0, _platform: "instagram" },
+    );
+    this.comments.set(key, list);
+    return id;
+  }
+
+  /** Adds or replaces a Shopify order. Fields follow the Admin GraphQL Order object. */
+  addShopOrder(o: Record<string, any>): void {
+    const now = new Date().toISOString();
+    const order = { test: false, tags: [], fulfillments: [], cancelledAt: null, returnStatus: "NO_RETURN", createdAt: now, updatedAt: now, ...o };
+    this.shopOrders = this.shopOrders.filter((x) => x.legacyResourceId !== order.legacyResourceId).concat(order);
+  }
+
+  private async shopify(req: IncomingMessage, res: ServerResponse) {
+    if (req.headers["x-shopify-access-token"] !== this.shopToken) {
+      return this.send(res, 401, { errors: "[API] Invalid API key or access token (unrecognized login or wrong password)" });
+    }
+    const chunks: Buffer[] = [];
+    for await (const c of req) chunks.push(c as Buffer);
+    const body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+    if (!/orders\(/.test(body.query ?? "")) return this.send(res, 200, { errors: [{ message: "The mock only serves orders" }] });
+    const m = /updated_at:(>=?)'([^']+)'/.exec(body.variables?.query ?? "");
+    const all = this.shopOrders
+      .filter((o) => !m || (m[1] === ">=" ? o.updatedAt >= m[2]! : o.updatedAt > m[2]!))
+      .sort((a, b) => (a.updatedAt < b.updatedAt ? -1 : 1));
+    const start = body.variables?.cursor ? Number(body.variables.cursor) : 0;
+    const page = all.slice(start, start + 2); // tiny pages so paging is exercised
+    const next = start + page.length;
+    return this.send(res, 200, {
+      data: { orders: { pageInfo: { hasNextPage: next < all.length, endCursor: next < all.length ? String(next) : null }, nodes: page } },
+    });
   }
 
   /** Programmatic failure injection for in-process tests. */
@@ -493,6 +546,12 @@ export class MetaMock {
       return this.page(res, [...this.objects.values()].filter((o) => o._type === "page").map((o) => this.publicView(o, params.fields)), params, url);
     }
 
+    if (edge === "comments" && this.comments.has(id)) {
+      const fb = !id.startsWith("ig");
+      if (fb && params.access_token !== PAGE_TOKEN) return this.err(res, 400, "(#210) A page access token is required to request this resource.", 210);
+      return this.page(res, this.comments.get(id)!.map((c) => ({ ...c })), params, url);
+    }
+
     const obj = this.requireObj(id);
     if (!edge) {
       const view = this.publicView(this.withEffective(obj), params.fields);
@@ -576,6 +635,13 @@ export class MetaMock {
             if (campaign.objective !== "OUTCOME_ENGAGEMENT" && campaign.objective !== "OUTCOME_SALES" && campaign.objective !== "OUTCOME_TRAFFIC") return this.err(res, 400, "Objective incompatible with messaging destination");
             if (apps.length > 1 && p.optimization_goal !== "CONVERSATIONS") return this.err(res, 400, "Multi-destination ad sets must optimize for CONVERSATIONS");
           }
+          const clickWindow = (p.attribution_spec ?? []).find((a: any) => a.event_type === "CLICK_THROUGH")?.window_days;
+          if (p.optimization_goal === "CONVERSATIONS" && clickWindow !== undefined && Number(clickWindow) !== 1) {
+            return this.err(res, 400, "Invalid parameter", 100, 3858382, {
+              error_user_title: "Unsupported attribution window",
+              error_user_msg: "The click attribution window is optional. For the selected objective and performance goal, use one of these supported windows: 1 days.",
+            });
+          }
           const t = p.targeting;
           // v26.0: ad sets must state the Advantage+ audience flag (Meta requires it for some setups; the mock always does).
           if (t.targeting_automation?.advantage_audience !== 0 && t.targeting_automation?.advantage_audience !== 1) {
@@ -585,7 +651,7 @@ export class MetaMock {
             // Meta: with Advantage+ audience, age_min may not be above 25.
             return this.err(res, 400, "Advantage+ audience: age_min must be 25 or lower", 100, 1870227);
           }
-          const s = this.create("adset", { ...pick(p, ["name", "campaign_id", "daily_budget", "lifetime_budget", "billing_event", "optimization_goal", "bid_strategy", "bid_amount", "destination_type", "promoted_object", "targeting", "start_time", "end_time", "is_dynamic_creative"]), status: p.status ?? "ACTIVE" });
+          const s = this.create("adset", { ...pick(p, ["name", "campaign_id", "daily_budget", "lifetime_budget", "billing_event", "optimization_goal", "bid_strategy", "bid_amount", "destination_type", "promoted_object", "targeting", "start_time", "end_time", "is_dynamic_creative", "attribution_spec"]), status: p.status ?? "ACTIVE" });
           return this.send(res, 200, { id: s.id });
         }
         case "adcreatives": {
@@ -632,6 +698,8 @@ export class MetaMock {
             return this.err(res, 400, "call_to_actions with at least two destinations is required for DOF_MESSAGING_DESTINATION");
           }
           const cr = this.create("adcreative", { ...pick(p, ["name", "object_story_spec", "asset_feed_spec", "degrees_of_freedom_spec", "object_id", "instagram_user_id", "source_instagram_media_id", "call_to_action", "product_set_id", "url_tags"]), thumbnail_url: `${this.baseUrl}/__mock/media/sample.jpg` });
+          cr.effective_object_story_id = `${this.opts.pageId}_${cr.id}`;
+          cr.effective_instagram_media_id = `ig${cr.id}`;
           return this.send(res, 200, { id: cr.id });
         }
         case "ads": {
@@ -678,13 +746,38 @@ export class MetaMock {
       return this.err(res, 400, `Unknown edge ${edge}`);
     }
 
+    const comment = [...this.comments.values()].flat().find((c) => c.id === id);
+    if (comment && !edge) {
+      if (comment._platform === "facebook") {
+        if (p.access_token !== PAGE_TOKEN) return this.err(res, 400, "(#210) A page access token is required", 210);
+        comment.is_hidden = p.is_hidden === true || p.is_hidden === "true";
+      } else {
+        comment.hidden = p.hide === true || p.hide === "true";
+      }
+      return this.send(res, 200, { success: true });
+    }
+
     const obj = this.requireObj(id);
     if (!edge) {
       if (p.status !== undefined && !STATUSES.has(p.status)) return this.err(res, 400, "Invalid status");
       if (obj.status === "ARCHIVED" && p.status === "ACTIVE") return this.err(res, 400, "Archived objects cannot be activated", 100, 1815694);
       if (p.daily_budget !== undefined && Number(p.daily_budget) < MIN_DAILY_BUDGET_MINOR) return this.err(res, 400, "Budget is too low", 100, 1487007);
       if (p.targeting !== undefined && !p.targeting?.geo_locations) return this.err(res, 400, "Location targeting is required", 100, 1487756);
-      for (const k of ["status", "daily_budget", "targeting", "name"]) if (p[k] !== undefined) obj[k] = p[k];
+      if (obj._type === "adset" && p.attribution_spec) {
+        const w = p.attribution_spec.find((a: any) => a.event_type === "CLICK_THROUGH")?.window_days;
+        if (obj.optimization_goal === "CONVERSATIONS" && w !== undefined && Number(w) !== 1) {
+          return this.err(res, 400, "Invalid parameter", 100, 3858382, { error_user_msg: "The click attribution window is optional. For the selected objective and performance goal, use one of these supported windows: 1 days." });
+        }
+      }
+      if (["COST_CAP", "LOWEST_COST_WITH_BID_CAP"].includes(p.bid_strategy) && !p.bid_amount && !obj.bid_amount) {
+        return this.err(res, 400, "Bid amount required for this bid strategy", 100, 1815857);
+      }
+      for (const k of ["status", "daily_budget", "targeting", "name", "bid_strategy", "bid_amount", "attribution_spec", "start_time", "end_time"]) if (p[k] !== undefined) obj[k] = p[k];
+      if (obj._type === "ad" && p.creative?.creative_id) {
+        this.requireObj(String(p.creative.creative_id), "adcreative");
+        obj.creative = { id: String(p.creative.creative_id) };
+        if (obj.status === "ACTIVE") obj._pendingReview = true;
+      }
       if (obj._type === "ad" && p.status === "ACTIVE") obj._pendingReview = false;
       return this.send(res, 200, { success: true });
     }

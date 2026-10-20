@@ -23,6 +23,7 @@ import {
   webhooksService,
   audiencesService,
   insightsService,
+  shopifyService,
   targetingService,
 } from "../src/index.js";
 
@@ -221,6 +222,31 @@ describe("messaging destinations", () => {
   });
 });
 
+describe("Shopify order outcome", () => {
+  const tags = ["refused", "rto"];
+  const st = (o: Record<string, unknown>) => shopifyService.orderStatus(o, tags);
+  it("maps Shopify's states to pending / delivered / refused / cancelled", () => {
+    expect(st({})).toBe("pending");
+    expect(st({ fulfillments: [{ displayStatus: "DELIVERED" }] })).toBe("delivered");
+    expect(st({ displayFinancialStatus: "PAID", displayFulfillmentStatus: "FULFILLED" })).toBe("delivered");
+    expect(st({ tags: ["RTO"], fulfillments: [{ displayStatus: "DELIVERED" }] })).toBe("refused");
+    expect(st({ returnStatus: "RETURNED" })).toBe("refused");
+    expect(st({ fulfillments: [{ displayStatus: "NOT_DELIVERED" }] })).toBe("refused");
+    expect(st({ cancelledAt: "2026-10-01T00:00:00Z", fulfillments: [{ displayStatus: "IN_TRANSIT" }] })).toBe("refused");
+    expect(st({ cancelledAt: "2026-10-01T00:00:00Z" })).toBe("cancelled");
+  });
+});
+
+describe("creative asset breakdowns", () => {
+  it("labels asset breakdown objects by their text, name or media ID", () => {
+    const row = insightsService.parseInsightRow(
+      { date_start: "2026-10-01", date_stop: "2026-10-01", spend: "10", body_asset: { text: "Sparkle for Eid", id: "1" }, video_asset: { video_id: "99", id: "2" } },
+      ["body_asset", "video_asset"],
+    );
+    expect(row.breakdown).toEqual({ body_asset: "Sparkle for Eid", video_asset: "99" });
+  });
+});
+
 describe("targeting merge", () => {
   it("drops read-only fields Meta returns", () => {
     const m = targetingService.mergeTargeting({ age_min: 20, age_range: [20, 40], geo_locations: { countries: ["PK"] } }, { age_min: 25 });
@@ -368,6 +394,15 @@ describe("MetaClient", () => {
     const u = new URL((fetchImpl.mock.calls[0] as any[])[0]);
     expect(u.searchParams.get("access_token")).toBe("app|secret");
     expect(u.searchParams.has("appsecret_proof")).toBe(false);
+  });
+
+  it("signs a per-call Page token with its own appsecret_proof", async () => {
+    const fetchImpl = vi.fn(async () => ok({ data: [] }));
+    const { c } = client(fetchImpl);
+    await c.get("123_456/comments", { access_token: "page-token" });
+    const u = new URL((fetchImpl.mock.calls[0] as any[])[0]);
+    expect(u.searchParams.get("access_token")).toBe("page-token");
+    expect(u.searchParams.get("appsecret_proof")).toBe(createHmac("sha256", "sec").update("page-token").digest("hex"));
   });
 
   it("handles non-JSON error bodies", async () => {

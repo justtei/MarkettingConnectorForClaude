@@ -5,7 +5,7 @@ import { fromMinorUnits } from "../meta/money.js";
 export const CAMPAIGN_FIELDS =
   "id,name,objective,status,effective_status,daily_budget,lifetime_budget,created_time,start_time,stop_time,buying_type";
 export const ADSET_FIELDS =
-  "id,name,campaign_id,status,effective_status,daily_budget,lifetime_budget,targeting,destination_type,optimization_goal,billing_event,bid_strategy,promoted_object,is_dynamic_creative,start_time,end_time";
+  "id,name,campaign_id,status,effective_status,daily_budget,lifetime_budget,targeting,destination_type,optimization_goal,billing_event,bid_strategy,bid_amount,attribution_spec,promoted_object,is_dynamic_creative,start_time,end_time";
 export const AD_FIELDS =
   "id,name,adset_id,campaign_id,status,effective_status,creative{id,name,thumbnail_url,object_type,title,body,image_hash,video_id,object_story_spec,asset_feed_spec}";
 

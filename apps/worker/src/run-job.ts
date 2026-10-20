@@ -1,8 +1,8 @@
-// Run one job by hand: pnpm --filter @sandalez/worker run-job sync|alerts|weekly_report|token_check
+// Run one job by hand: pnpm --filter @sandalez/worker run-job sync|alerts|weekly_report|token_check|shop_sync
 import { createCore } from "@sandalez/core";
-import { alertsJob, syncJob, tokenCheckJob, weeklyReportJob } from "./jobs/index.js";
+import { alertsJob, shopSyncJob, syncJob, tokenCheckJob, weeklyReportJob } from "./jobs/index.js";
 
-const jobs = { sync: syncJob, alerts: alertsJob, weekly_report: weeklyReportJob, token_check: tokenCheckJob } as const;
+const jobs = { sync: syncJob, alerts: alertsJob, weekly_report: weeklyReportJob, token_check: tokenCheckJob, shop_sync: shopSyncJob } as const;
 const name = process.argv[2] as keyof typeof jobs;
 if (!jobs[name]) {
   console.error(`Usage: run-job ${Object.keys(jobs).join("|")}`);

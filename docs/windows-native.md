@@ -81,7 +81,7 @@ Then see [usage.md](usage.md).
 | Logs | `Get-Content logs\sandalez-mcp.log -Tail 50` (also `-api`, `-web`, `-worker`) |
 | Update to the latest code | `git pull` then `powershell -ExecutionPolicy Bypass -File scripts\windows\install.ps1 -Funnel` |
 | Add a dashboard user | `pnpm user:add staff@x.com "a-long-password" staff` |
-| Run a job now | `pnpm job sync` (or `alerts`, `weekly_report`, `token_check`) |
+| Run a job now | `pnpm job sync` (or `alerts`, `weekly_report`, `token_check`, `shop_sync`) |
 | Back up the database | `& "D:\PostgreSQL\17\bin\pg_dump.exe" -h localhost -U sandalez -d sandalez --clean --if-exists -f backup.sql` (password: `POSTGRES_PASSWORD` in `.env`) |
 | Restore a backup | `& "D:\PostgreSQL\17\bin\psql.exe" -h localhost -U sandalez -d sandalez -v ON_ERROR_STOP=1 -f backup.sql` |
 | SQL shell | `& "D:\PostgreSQL\17\bin\psql.exe" -h localhost -U sandalez -d sandalez` |
