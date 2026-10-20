@@ -26,11 +26,11 @@ export function forcePaused<T extends Record<string, unknown>>(params: T): T & {
 }
 
 /** Live actions (can spend or change spend) need confirm: true, which Claude must get from the user first. */
-export function requireConfirm(confirm: boolean | undefined, description: string): void {
+export function requireConfirm(confirm: boolean | undefined, description: string, risk = "This can spend money."): void {
   if (confirm !== true) {
     throw new GuardError(
       "confirm_required",
-      `Confirmation required: ${description}. This can spend money. Ask the user to confirm, then call again with confirm: true.`,
+      `Confirmation required: ${description}. ${risk} Ask the user to confirm, then call again with confirm: true.`,
     );
   }
 }

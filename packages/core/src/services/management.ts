@@ -213,7 +213,7 @@ export async function deleteObject(ctx: CoreContext, input: { object_id: string;
     throw new UserInputError(`${label} "${obj.name}" (${obj.id}) is active. Pause it first (set_status PAUSED), then delete it.`);
   }
   const inside = [children.adsets && `${children.adsets} ad set(s)`, children.ads && `${children.ads} ad(s)`].filter(Boolean).join(" and ");
-  requireConfirm(input.confirm, `permanently delete ${label} "${obj.name}" (${obj.id})${inside ? ` with its ${inside}` : ""}; this cannot be undone`);
+  requireConfirm(input.confirm, `permanently delete ${label} "${obj.name}" (${obj.id})${inside ? ` with its ${inside}` : ""}`, "This cannot be undone.");
 
   const before = { type, name: obj.name, status: obj.status, effective_status: obj.effective_status, children };
   return audited(ctx, "delete_object", { objectId: obj.id, request: input, before }, async () => {
