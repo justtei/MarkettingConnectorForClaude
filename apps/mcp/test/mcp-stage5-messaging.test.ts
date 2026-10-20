@@ -167,6 +167,22 @@ describe("delete_object", () => {
     expect((audit?.before as any).name).toBe("Leftover");
   });
 
+  it("works on objects the tool has never seen (made in Ads Manager, or after a restart): types are probed, not read from metadata", async () => {
+    const camp = h.mock.create("campaign", { name: "Made in Ads Manager", objective: "OUTCOME_SALES", status: "PAUSED", special_ad_categories: [] });
+    const set = h.mock.create("adset", { name: "AM set", campaign_id: camp.id, status: "PAUSED", daily_budget: "50000", targeting: { geo_locations: { countries: ["PK"] } } });
+    const ad = h.mock.create("ad", { name: "AM ad", adset_id: set.id, campaign_id: camp.id, status: "PAUSED", creative: { id: ids.creative } });
+
+    const paused = await call(client, "set_status", { object_id: set.id, status: "PAUSED" });
+    expect(paused.ok, JSON.stringify(paused.data)).toBe(true);
+    expect(paused.data.type).toBe("adset");
+    const delAd = await call(client, "delete_object", { object_id: ad.id, confirm: true });
+    expect(delAd.ok, JSON.stringify(delAd.data)).toBe(true);
+    expect(delAd.data.type).toBe("ad");
+    const delCamp = await call(client, "delete_object", { object_id: camp.id, confirm: true });
+    expect(delCamp.ok, JSON.stringify(delCamp.data)).toBe(true);
+    expect(delCamp.data.type).toBe("campaign");
+  });
+
   it("refuses things that aren't campaigns, ad sets or ads", async () => {
     const { ok, data } = await call(client, "delete_object", { object_id: ids.creative, confirm: true });
     expect(ok).toBe(false);

@@ -96,9 +96,42 @@ export async function resolveOwnedObject(ctx: CoreContext, objectId: string): Pr
     throw new GuardError("wrong_account", `Refused: object ${objectId} is not an ad object of the Sandalez account.`);
   }
   assertOwnAccount(ctx.config, res.account_id);
-  const t = (res.metadata?.type ?? "unknown") as ObjectType;
+  // The live API no longer returns metadata.type for ad objects, so fall back to the DB mirror, then to probing.
+  const t = (res.metadata?.type as ObjectType | undefined) ?? (await typeFromMirror(ctx, objectId)) ?? (await probeType(ctx, objectId));
   ownershipCache.set(objectId, { type: t, accountId: res.account_id });
   return t;
+}
+
+async function typeFromMirror(ctx: CoreContext, id: string): Promise<ObjectType | undefined> {
+  const where = { where: { id }, select: { id: true } } as const;
+  const [c, s, a, cr] = await Promise.all([
+    ctx.db.campaign.findUnique(where),
+    ctx.db.adSet.findUnique(where),
+    ctx.db.ad.findUnique(where),
+    ctx.db.creative.findUnique(where),
+  ]);
+  return c ? "campaign" : s ? "adset" : a ? "ad" : cr ? "adcreative" : undefined;
+}
+
+/** Each field exists on one kind of node only; Meta answers (#100) for the others. Ordered by how often each is used. */
+const TYPE_PROBES: [ObjectType, string][] = [
+  ["ad", "adset_id"],
+  ["adset", "campaign_id"],
+  ["campaign", "objective"],
+  ["adcreative", "object_type"],
+  ["customaudience", "subtype"],
+];
+
+async function probeType(ctx: CoreContext, id: string): Promise<ObjectType> {
+  for (const [type, field] of TYPE_PROBES) {
+    try {
+      await ctx.meta.get(id, { fields: `id,${field}` });
+      return type;
+    } catch (err) {
+      if ((err as { code?: number }).code !== 100) throw err;
+    }
+  }
+  return "unknown";
 }
 
 export function rememberOwned(ctx: CoreContext, objectId: string, type: ObjectType): void {

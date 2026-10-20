@@ -108,7 +108,7 @@ docker compose -f docker-compose.yml -f docker-compose.demo.yml --env-file .env.
 ## Tests
 
 ```bash
-pnpm test        # 204 tests: core units, MCP end-to-end over HTTP + stdio, REST API, worker, setup scripts
+pnpm test        # 205 tests: core units, MCP end-to-end over HTTP + stdio, REST API, worker, setup scripts
 pnpm test:e2e    # Playwright UI flows (desktop + mobile) against a running stack
 pnpm typecheck
 ```

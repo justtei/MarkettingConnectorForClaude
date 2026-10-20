@@ -68,6 +68,14 @@ const DESTINATIONS = new Set([
   "UNDEFINED",
 ]);
 const MESSAGING_APPS = ["WHATSAPP", "INSTAGRAM_DIRECT", "MESSENGER"];
+/** Fields that exist only on some node types (others answer "(#100) Tried accessing nonexisting field"). */
+const TYPE_ONLY_FIELDS: Record<string, string[]> = {
+  adset_id: ["ad"],
+  campaign_id: ["ad", "adset"],
+  objective: ["campaign"],
+  object_type: ["adcreative"],
+  subtype: ["customaudience"],
+};
 /** Button type -> the app_destination Meta requires with it. */
 const CTA_APP: Record<string, string> = { WHATSAPP_MESSAGE: "WHATSAPP", INSTAGRAM_MESSAGE: "INSTAGRAM_DIRECT", MESSAGE_PAGE: "MESSENGER" };
 
@@ -489,7 +497,13 @@ export class MetaMock {
     if (!edge) {
       const view = this.publicView(this.withEffective(obj), params.fields);
       if (params.fields && splitFields(params.fields).includes("account_id") && obj.account_id) view.account_id = obj.account_id;
-      if (String(params.metadata) === "1") view.metadata = { type: obj._type };
+      // Like the live v26 API: no `metadata` on these nodes, and asking for a field the node type doesn't have is an error.
+      const wanted = params.fields ? splitFields(params.fields) : [];
+      for (const [field, types] of Object.entries(TYPE_ONLY_FIELDS)) {
+        if (wanted.includes(field) && !types.includes(obj._type)) {
+          return this.err(res, 400, `(#100) Tried accessing nonexisting field (${field}) on node type (${obj._type})`, 100);
+        }
+      }
       return this.send(res, 200, view);
     }
     switch (edge) {
