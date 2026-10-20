@@ -133,6 +133,47 @@ describe("Instagram DMs + WhatsApp", () => {
   });
 });
 
+describe("delete_object", () => {
+  it("needs confirm, refuses an active object, then deletes a paused campaign with its ad sets and ads", async () => {
+    const camp = await call(client, "create_campaign", { name: "Leftover" });
+    const set = await call(client, "create_adset", {
+      campaign_id: camp.data.campaign_id,
+      name: "Leftover WA",
+      daily_budget: 500,
+      targeting: { cities: ["Karachi"], age_min: 20, age_max: 40 },
+    });
+    expect(set.ok, JSON.stringify(set.data)).toBe(true);
+    const id = camp.data.campaign_id;
+
+    const noConfirm = await call(client, "delete_object", { object_id: id });
+    expect(noConfirm.data.rule).toBe("confirm_required");
+    expect(noConfirm.data.error).toMatch(/permanently delete campaign "Leftover".*1 ad set/);
+    expect(h.mock.objects.get(id)!.status).toBe("PAUSED");
+
+    h.mock.objects.get(id)!.status = "ACTIVE";
+    const active = await call(client, "delete_object", { object_id: id, confirm: true });
+    expect(active.ok).toBe(false);
+    expect(active.data.error).toMatch(/is active\. Pause it first/);
+    h.mock.objects.get(id)!.status = "PAUSED";
+
+    const { ok, data } = await call(client, "delete_object", { object_id: id, confirm: true });
+    expect(ok, JSON.stringify(data)).toBe(true);
+    expect(data).toMatchObject({ deleted: true, type: "campaign", also_deleted: { adsets: 1, ads: 0 } });
+    expect(h.mock.objects.get(id)!.status).toBe("DELETED");
+    const rows = await h.core.db.adSet.findMany({ where: { campaignId: id } });
+    expect(rows.every((r) => r.status === "DELETED")).toBe(true);
+    const audit = await h.core.db.auditLog.findFirst({ where: { action: "delete_object", objectId: id } });
+    expect(audit?.ok).toBe(true);
+    expect((audit?.before as any).name).toBe("Leftover");
+  });
+
+  it("refuses things that aren't campaigns, ad sets or ads", async () => {
+    const { ok, data } = await call(client, "delete_object", { object_id: ids.creative, confirm: true });
+    expect(ok).toBe(false);
+    expect(data.error).toMatch(/only campaigns, ad sets and ads can be deleted/);
+  });
+});
+
 describe("duplicate_campaign when Meta's copy refuses the campaign", () => {
   it("rebuilds it object by object, keeps the destination, and cleans the creative", async () => {
     // Make the source look like an older ad: its creative still carries the retired bundle, so /copies fails.

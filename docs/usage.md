@@ -54,6 +54,7 @@ Also available:
 | "Target 3 km around Gulistan-e-Johar and DHA" | map pins (`pins`: latitude, longitude, radius) |
 | "Give the ad 3 versions of the text and 2 headlines" | `primary_texts`, `headlines` |
 | "Turn on text improvements and auto-crop, but not comments" | `creative_features` (Advantage+ creative features, one by one; Meta retired the old all-in-one "standard enhancements") |
+| "Delete the empty WhatsApp-only ad set" | `delete_object`: only for paused things, after you say yes; it removes what's inside too and can't be undone. Past spend and orders stay in the dashboard |
 | "Copy the 10 Oct campaign" | `duplicate_campaign`. If Meta's own copy refuses an older campaign, the tool rebuilds it piece by piece (`method: rebuilt`) |
 
 ### Day-to-day management
@@ -79,7 +80,7 @@ Then ask "**What's my real cost per order this week, by ad?**" (`get_cost_per_or
 
 ### Tool permissions in claude.ai
 
-Under Customize → Connectors → Sandalez Ads, set the tools that change live spend (`set_status`, `update_budget`, `update_targeting`, `bulk_update`) to **Needs approval** and the rest to **Always allow**. That way you also click "Allow" in Claude's UI on top of the server's own confirmation. In Claude Code, you approve each tool call unless you allow it in `/permissions`.
+Under Customize → Connectors → Sandalez Ads, set the tools that change live spend or delete (`set_status`, `update_budget`, `update_targeting`, `bulk_update`, `delete_object`) to **Needs approval** and the rest to **Always allow**. That way you also click "Allow" in Claude's UI on top of the server's own confirmation. In Claude Code, you approve each tool call unless you allow it in `/permissions`.
 
 The full list of tools with every parameter is in [mcp-tools.md](mcp-tools.md).
 

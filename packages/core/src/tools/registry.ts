@@ -332,6 +332,23 @@ export const tools = [
     input: targetingUpdateInput,
     handler: (ctx, i) => management.updateTargeting(ctx, i),
   }),
+  tool({
+    name: "delete_object",
+    title: "Delete campaign / ad set / ad",
+    group: "Management",
+    phase: 2,
+    level: "live",
+    description:
+      "Permanently delete a campaign, ad set or ad on Meta, with everything inside it (a campaign's ad sets and ads). Cannot be undone. " +
+      "Refused while the object is active: pause it first. Use it to clean up drafts and leftovers; to stop spend, pause instead. " +
+      "Past spend and orders stay in the dashboard. Before calling with confirm: true you MUST name exactly what will be deleted " +
+      "(name, ID and what is inside it) and get the user's explicit yes in chat.",
+    input: z.object({
+      object_id: metaId.describe("Campaign, ad set or ad ID"),
+      confirm: z.boolean().optional().describe("Must be true. Ask the user first."),
+    }),
+    handler: (ctx, i) => management.deleteObject(ctx, i),
+  }),
 
   // ------------------------------------------------------------- insights
   tool({

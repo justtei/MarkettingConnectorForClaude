@@ -2,7 +2,7 @@
 
 A Node.js/TypeScript backend for Meta's Marketing API, scoped to the Sandalez ad account only. It is exposed two ways:
 
-- **an MCP server** that Claude drives from chat (43 tools), and
+- **an MCP server** that Claude drives from chat (44 tools), and
 - **a web dashboard** (mobile-first) for the owner and staff.
 
 Both are thin layers over one core package. That core is the only code that holds the Meta token and calls Meta, so the safety rules and the audit log apply to every change.
@@ -74,7 +74,7 @@ claude mcp add --scope user --transport http sandalez-ads http://localhost:3001/
 | Live actions need confirmation | `set_status` ACTIVE/ARCHIVED, `update_budget`, `update_targeting` and `bulk_update` refuse without `confirm: true`. The MCP instructions tell Claude to get your explicit yes first |
 | Budget cap | `MAX_DAILY_BUDGET_PKR` (default 2,000) and `MAX_BUDGET_INCREASE_PCT` (default 30%); editable by the owner in Settings |
 | One ad account | Every object ID is checked against `META_AD_ACCOUNT_ID`; other accounts are refused |
-| No deletes | No delete tools. Internal rollback of a failed multi-step create is the only delete |
+| Deletes need care | `delete_object` permanently deletes a campaign, ad set or ad only with `confirm: true`, and refuses anything still active (pause first). Past spend and orders stay in the dashboard; the audit log keeps what was deleted |
 | Audit log | Every write stores who, what, request, response and the previous state (Activity log page and `get_activity_log`) |
 | Token safety | The token lives only in server env vars; `check_token` and a daily job warn before expiry |
 | Rate limits | Usage headers are read on every response; calls slow down above 75% and back off on rate-limit errors; the dashboard reads the DB, not Meta |
@@ -108,7 +108,7 @@ docker compose -f docker-compose.yml -f docker-compose.demo.yml --env-file .env.
 ## Tests
 
 ```bash
-pnpm test        # 202 tests: core units, MCP end-to-end over HTTP + stdio, REST API, worker, setup scripts
+pnpm test        # 204 tests: core units, MCP end-to-end over HTTP + stdio, REST API, worker, setup scripts
 pnpm test:e2e    # Playwright UI flows (desktop + mobile) against a running stack
 pnpm typecheck
 ```

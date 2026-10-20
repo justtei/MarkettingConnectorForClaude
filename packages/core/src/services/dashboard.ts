@@ -152,13 +152,13 @@ export async function campaignTreeFromDb(ctx: CoreContext, days = 7, includeArch
   const since = addDays(today, -(days - 1));
   const [campaigns, byAd] = await Promise.all([
     ctx.db.campaign.findMany({
-      where: includeArchived ? {} : { status: { not: "ARCHIVED" } },
+      where: { status: { notIn: includeArchived ? ["DELETED"] : ["ARCHIVED", "DELETED"] } },
       include: {
         adSets: {
-          where: includeArchived ? {} : { status: { not: "ARCHIVED" } },
+          where: { status: { notIn: includeArchived ? ["DELETED"] : ["ARCHIVED", "DELETED"] } },
           include: {
             ads: {
-              where: includeArchived ? {} : { status: { not: "ARCHIVED" } },
+              where: { status: { notIn: includeArchived ? ["DELETED"] : ["ARCHIVED", "DELETED"] } },
               include: { creative: { select: { id: true, type: true, thumbnailUrl: true, headline: true } } },
               orderBy: { name: "asc" },
             },

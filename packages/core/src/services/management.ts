@@ -191,6 +191,49 @@ export async function bulkUpdate(
   return { total: results.length, succeeded: results.filter((r) => r.ok).length, results };
 }
 
+/**
+ * delete_object: permanently deletes a campaign, ad set or ad on Meta (with everything inside it). Needs confirm: true,
+ * and refuses anything still running so a live campaign is never removed by mistake: pause it first.
+ * The dashboard keeps its spend and order history (rows are marked DELETED, not removed).
+ */
+export async function deleteObject(ctx: CoreContext, input: { object_id: string; confirm?: boolean }) {
+  const { type, obj } = await readObject(ctx, input.object_id);
+  if (type !== "campaign" && type !== "adset" && type !== "ad") {
+    throw new UserInputError(`${input.object_id} is a ${type}; only campaigns, ad sets and ads can be deleted.`);
+  }
+  const label = type === "adset" ? "ad set" : type;
+  const children =
+    type === "ad"
+      ? { adsets: 0, ads: 0 }
+      : {
+          adsets: type === "campaign" ? (await ctx.meta.getAll<any>(`${obj.id}/adsets`, { fields: "id" }, 500)).length : 0,
+          ads: (await ctx.meta.getAll<any>(`${obj.id}/ads`, { fields: "id" }, 500)).length,
+        };
+  if (obj.status === "ACTIVE") {
+    throw new UserInputError(`${label} "${obj.name}" (${obj.id}) is active. Pause it first (set_status PAUSED), then delete it.`);
+  }
+  const inside = [children.adsets && `${children.adsets} ad set(s)`, children.ads && `${children.ads} ad(s)`].filter(Boolean).join(" and ");
+  requireConfirm(input.confirm, `permanently delete ${label} "${obj.name}" (${obj.id})${inside ? ` with its ${inside}` : ""}; this cannot be undone`);
+
+  const before = { type, name: obj.name, status: obj.status, effective_status: obj.effective_status, children };
+  return audited(ctx, "delete_object", { objectId: obj.id, request: input, before }, async () => {
+    await ctx.meta.delete(obj.id);
+    // Keep the mirror rows (their daily stats and order links stay), just mark them deleted.
+    const data = { status: "DELETED", effectiveStatus: "DELETED" };
+    if (type === "campaign") {
+      await ctx.db.campaign.updateMany({ where: { id: obj.id }, data });
+      await ctx.db.adSet.updateMany({ where: { campaignId: obj.id }, data });
+      await ctx.db.ad.updateMany({ where: { adSet: { campaignId: obj.id } }, data });
+    } else if (type === "adset") {
+      await ctx.db.adSet.updateMany({ where: { id: obj.id }, data });
+      await ctx.db.ad.updateMany({ where: { adSetId: obj.id }, data });
+    } else {
+      await ctx.db.ad.updateMany({ where: { id: obj.id }, data });
+    }
+    return { object_id: obj.id, type, name: obj.name, deleted: true, also_deleted: children };
+  });
+}
+
 /** Phase 2: deep-copy a campaign (PAUSED), optionally renaming it and retargeting it to another city. */
 export async function duplicateCampaign(
   ctx: CoreContext,

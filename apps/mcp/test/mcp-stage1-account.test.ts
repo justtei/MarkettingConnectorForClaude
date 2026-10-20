@@ -121,8 +121,11 @@ describe("tool discovery", () => {
     expect(setStatus.inputSchema.properties).toHaveProperty("confirm");
     const getAccount = listed.find((t) => t.name === "get_account")!;
     expect(getAccount.annotations?.readOnlyHint).toBe(true);
-    // No delete tools are exposed (spec: no deletes in MVP).
-    expect(listed.some((t) => t.name.startsWith("delete"))).toBe(false);
+    // The only delete tool is the guarded delete_object (confirm: true, refused while active).
+    expect(listed.filter((t) => t.name.startsWith("delete")).map((t) => t.name)).toEqual(["delete_object"]);
+    const del = listed.find((t) => t.name === "delete_object")!;
+    expect(del.annotations?.destructiveHint).toBe(true);
+    expect(del.inputSchema.properties).toHaveProperty("confirm");
   });
 
   it("sends server instructions with the safety rules", () => {
