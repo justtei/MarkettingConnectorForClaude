@@ -55,6 +55,35 @@ const INTERESTS = [
 
 const OBJECTIVES = new Set(["OUTCOME_ENGAGEMENT", "OUTCOME_TRAFFIC", "OUTCOME_SALES", "OUTCOME_LEADS", "OUTCOME_AWARENESS", "OUTCOME_APP_PROMOTION"]);
 const STATUSES = new Set(["ACTIVE", "PAUSED", "ARCHIVED", "DELETED"]);
+const DESTINATIONS = new Set([
+  "WHATSAPP",
+  "INSTAGRAM_DIRECT",
+  "MESSENGER",
+  "MESSAGING_INSTAGRAM_DIRECT_WHATSAPP",
+  "MESSAGING_MESSENGER_WHATSAPP",
+  "MESSAGING_INSTAGRAM_DIRECT_MESSENGER",
+  "MESSAGING_INSTAGRAM_DIRECT_MESSENGER_WHATSAPP",
+  "WEBSITE",
+  "ON_AD",
+  "UNDEFINED",
+]);
+const MESSAGING_APPS = ["WHATSAPP", "INSTAGRAM_DIRECT", "MESSENGER"];
+/** Button type -> the app_destination Meta requires with it. */
+const CTA_APP: Record<string, string> = { WHATSAPP_MESSAGE: "WHATSAPP", INSTAGRAM_MESSAGE: "INSTAGRAM_DIRECT", MESSAGE_PAGE: "MESSENGER" };
+
+function appsForDestination(d: unknown): string[] {
+  const s = String(d ?? "");
+  if (MESSAGING_APPS.includes(s)) return [s];
+  return s.startsWith("MESSAGING_") ? MESSAGING_APPS.filter((a) => s.includes(a)) : [];
+}
+
+function creativeApps(cr: Record<string, any>): string[] {
+  const oss = cr.object_story_spec ?? {};
+  const ctas = [...(cr.asset_feed_spec?.call_to_actions ?? []), oss.link_data?.call_to_action, oss.video_data?.call_to_action, cr.call_to_action];
+  const apps = new Set<string>();
+  for (const c of ctas) if (c?.value?.app_destination && MESSAGING_APPS.includes(c.value.app_destination)) apps.add(c.value.app_destination);
+  return [...apps];
+}
 const MIN_DAILY_BUDGET_MINOR = 10_000; // PKR 100 in the mock
 
 // A 1x1 JPEG.
@@ -525,9 +554,13 @@ export class MetaMock {
           if (p.daily_budget && Number(p.daily_budget) < MIN_DAILY_BUDGET_MINOR) {
             return this.err(res, 400, "Budget is too low", 100, 1487007, { error_user_msg: "The minimum daily budget is PKR 100.00" });
           }
-          if (p.destination_type === "WHATSAPP") {
-            if (!p.promoted_object?.page_id || !p.promoted_object?.whatsapp_phone_number) return this.err(res, 400, "promoted_object with page_id and whatsapp_phone_number is required", 100, 2446289);
-            if (campaign.objective !== "OUTCOME_ENGAGEMENT" && campaign.objective !== "OUTCOME_SALES" && campaign.objective !== "OUTCOME_TRAFFIC") return this.err(res, 400, "Objective incompatible with WhatsApp destination");
+          const apps = appsForDestination(p.destination_type);
+          if (p.destination_type && !DESTINATIONS.has(p.destination_type)) return this.err(res, 400, `Invalid destination_type ${p.destination_type}`, 100);
+          if (apps.length) {
+            if (!p.promoted_object?.page_id) return this.err(res, 400, "promoted_object with page_id is required", 100, 2446289);
+            if (apps.includes("WHATSAPP") && !p.promoted_object?.whatsapp_phone_number) return this.err(res, 400, "promoted_object with page_id and whatsapp_phone_number is required", 100, 2446289);
+            if (campaign.objective !== "OUTCOME_ENGAGEMENT" && campaign.objective !== "OUTCOME_SALES" && campaign.objective !== "OUTCOME_TRAFFIC") return this.err(res, 400, "Objective incompatible with messaging destination");
+            if (apps.length > 1 && p.optimization_goal !== "CONVERSATIONS") return this.err(res, 400, "Multi-destination ad sets must optimize for CONVERSATIONS");
           }
           const t = p.targeting;
           // v26.0: ad sets must state the Advantage+ audience flag (Meta requires it for some setups; the mock always does).
@@ -567,17 +600,39 @@ export class MetaMock {
             }
             const cta = (ld ?? vd)?.call_to_action;
             if (cta?.type === "WHATSAPP_MESSAGE" && cta.value?.app_destination !== "WHATSAPP") return this.err(res, 400, "WHATSAPP_MESSAGE requires app_destination WHATSAPP");
+            for (const c of [cta, ...(p.asset_feed_spec?.call_to_actions ?? [])]) {
+              const want = c && CTA_APP[c.type];
+              if (want && c.value?.app_destination !== want) return this.err(res, 400, `${c.type} requires app_destination ${want}`);
+            }
           } else if (!p.source_instagram_media_id && !p.object_id) {
             return this.err(res, 400, "object_story_spec is required");
           }
-          const cr = this.create("adcreative", { ...pick(p, ["name", "object_story_spec", "asset_feed_spec", "object_id", "instagram_user_id", "source_instagram_media_id", "call_to_action", "product_set_id"]), thumbnail_url: `${this.baseUrl}/__mock/media/sample.jpg` });
+          if (p.degrees_of_freedom_spec?.creative_features_spec?.standard_enhancements) {
+            return this.err(res, 400, "Invalid parameter", 100, 3858504, {
+              error_user_title: "Creative should not include standard enhancements",
+              error_user_msg: "Including standard enhancements field in creative has been deprecated. Please choose to set individual features instead.",
+            });
+          }
+          const afs = p.asset_feed_spec;
+          if (afs?.optimization_type === "DOF_MESSAGING_DESTINATION" && !(afs.call_to_actions?.length >= 2)) {
+            return this.err(res, 400, "call_to_actions with at least two destinations is required for DOF_MESSAGING_DESTINATION");
+          }
+          const cr = this.create("adcreative", { ...pick(p, ["name", "object_story_spec", "asset_feed_spec", "degrees_of_freedom_spec", "object_id", "instagram_user_id", "source_instagram_media_id", "call_to_action", "product_set_id", "url_tags"]), thumbnail_url: `${this.baseUrl}/__mock/media/sample.jpg` });
           return this.send(res, 200, { id: cr.id });
         }
         case "ads": {
           const s = this.requireObj(String(p.adset_id), "adset");
           const crId = p.creative?.creative_id;
           if (!crId) return this.err(res, 400, "creative is required");
-          this.requireObj(String(crId), "adcreative");
+          const cr = this.requireObj(String(crId), "adcreative");
+          const want = appsForDestination(s.destination_type);
+          const have = creativeApps(cr);
+          if (want.length && have.length && (want.length !== have.length || want.some((a) => !have.includes(a)))) {
+            return this.err(res, 400, "Invalid parameter", 100, 2490279, {
+              error_user_title: "Inconsistent campaign destination type with app destination",
+              error_user_msg: "The campaign destination type must be consistent with app destination in call to action",
+            });
+          }
           const ad = this.create("ad", { name: p.name, adset_id: s.id, campaign_id: s.campaign_id, status: p.status ?? "ACTIVE", creative: { id: crId } });
           return this.send(res, 200, { id: ad.id });
         }
@@ -622,6 +677,17 @@ export class MetaMock {
     switch (edge) {
       case "copies": {
         if (obj._type !== "campaign") return this.err(res, 400, "Only campaigns can be copied here");
+        if (p.deep_copy) {
+          for (const a of this.children("ad", (o) => o.campaign_id === obj.id, {})) {
+            const cr = this.objects.get(String(a.creative?.id));
+            if (cr?.degrees_of_freedom_spec?.creative_features_spec?.standard_enhancements) {
+              return this.err(res, 400, "Invalid parameter", 100, 3858504, {
+                error_user_title: "Creative should not include standard enhancements",
+                error_user_msg: "Including standard enhancements field in creative has been deprecated. Please choose to set individual features instead.",
+              });
+            }
+          }
+        }
         const suffix = p.rename_options?.rename_suffix ?? " - Copy";
         const status = p.status_option === "PAUSED" ? "PAUSED" : obj.status;
         const nc = this.create("campaign", { ...strip(obj), name: `${obj.name}${suffix}`, status });

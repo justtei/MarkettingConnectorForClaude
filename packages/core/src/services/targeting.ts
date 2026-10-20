@@ -67,6 +67,18 @@ export async function buildTargeting(ctx: CoreContext, t: TargetingInput): Promi
   }
   if (t.countries?.length) geo.countries = t.countries.map((c) => c.toUpperCase());
   if (t.region_keys?.length) geo.regions = t.region_keys.map((key) => ({ key }));
+  if (t.pins?.length) {
+    geo.custom_locations = t.pins.map((p) => ({
+      latitude: p.latitude,
+      longitude: p.longitude,
+      radius: p.radius_km,
+      distance_unit: "kilometer",
+      ...(p.name ? { name: p.name } : {}),
+    }));
+  }
+  if (t.place_keys?.length) {
+    geo.places = t.place_keys.map((p) => (p.radius_km ? { key: p.key, radius: p.radius_km, distance_unit: "kilometer" } : { key: p.key }));
+  }
   if (Object.keys(geo).length) {
     geo.location_types = t.location_types ?? ["home", "recent"];
     spec.geo_locations = geo;
@@ -119,7 +131,7 @@ export function mergeTargeting(current: Record<string, unknown>, changes: Record
 
 export function validateTargetingSpec(spec: Record<string, any>): void {
   if (!spec.geo_locations) {
-    throw new UserInputError("Targeting needs a location: give cities, city_keys, countries or region_keys.");
+    throw new UserInputError("Targeting needs a location: give cities, city_keys, countries, region_keys, pins or place_keys.");
   }
 }
 

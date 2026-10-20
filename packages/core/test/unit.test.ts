@@ -2,6 +2,10 @@ import { createHmac } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import {
   addDays,
+  appsForCreative,
+  appsForDestinationType,
+  destinationTypeForApps,
+  sanitizeDegreesOfFreedom,
   buildCreativePayload,
   buildWelcomeMessage,
   checkDailyBudget,
@@ -144,6 +148,76 @@ describe("creative payloads (fixtures from the spec)", () => {
     const w = buildWelcomeMessage({ icebreakers: ["a", "b", "c", "d", "e"] }) as any;
     expect(w.text_format.message.ice_breakers).toHaveLength(4);
     expect((buildWelcomeMessage({}) as any).text_format.message.text).toMatch(/Sandalez/);
+  });
+});
+
+describe("messaging destinations", () => {
+  it("maps apps to ad set destinations and back", () => {
+    expect(destinationTypeForApps(["whatsapp"])).toBe("WHATSAPP");
+    expect(destinationTypeForApps(["whatsapp", "instagram_direct"])).toBe("MESSAGING_INSTAGRAM_DIRECT_WHATSAPP");
+    expect(destinationTypeForApps(["messenger", "whatsapp", "instagram_direct"])).toBe("MESSAGING_INSTAGRAM_DIRECT_MESSENGER_WHATSAPP");
+    expect(appsForDestinationType("MESSAGING_MESSENGER_WHATSAPP")).toEqual(["whatsapp", "messenger"]);
+    expect(appsForDestinationType("INSTAGRAM_DIRECT")).toEqual(["instagram_direct"]);
+    expect(appsForDestinationType("WEBSITE")).toEqual([]);
+  });
+  it("reads the apps from a creative as Meta returns it (the live Instagram + WhatsApp ad)", () => {
+    const live = {
+      object_story_spec: { video_data: { call_to_action: { type: "WHATSAPP_MESSAGE", value: { app_destination: "WHATSAPP" } } } },
+      asset_feed_spec: {
+        optimization_type: "DOF_MESSAGING_DESTINATION",
+        call_to_actions: [
+          { type: "WHATSAPP_MESSAGE", value: { app_destination: "WHATSAPP" } },
+          { type: "INSTAGRAM_MESSAGE", value: { app_destination: "INSTAGRAM_DIRECT", app_link: "instagram://direct?userid=1" } },
+        ],
+      },
+    };
+    expect(appsForCreative(live)).toEqual(["whatsapp", "instagram_direct"]);
+  });
+  it("builds one button per app with WhatsApp as the main button", () => {
+    const p = buildCreativePayload({
+      name: "multi",
+      format: "image",
+      destination: "whatsapp",
+      messaging_apps: ["messenger", "instagram_direct", "whatsapp"],
+      page_id: "P",
+      instagram_user_id: "IG",
+      image_hash: "H",
+      primary_text: "t",
+    }) as any;
+    expect(p.object_story_spec.link_data.call_to_action.type).toBe("WHATSAPP_MESSAGE");
+    expect(p.object_story_spec.link_data.page_welcome_message).toBeDefined();
+    expect(p.asset_feed_spec).toEqual({
+      optimization_type: "DOF_MESSAGING_DESTINATION",
+      call_to_actions: [
+        { type: "WHATSAPP_MESSAGE", value: { app_destination: "WHATSAPP", link: "https://api.whatsapp.com/send" } },
+        { type: "INSTAGRAM_MESSAGE", value: { app_destination: "INSTAGRAM_DIRECT", link: "https://www.instagram.com" } },
+        { type: "MESSAGE_PAGE", value: { app_destination: "MESSENGER", link: "https://fb.com/messenger_doc/" } },
+      ],
+    });
+  });
+  it("single Instagram or Messenger destinations get their own button", () => {
+    const ig = buildCreativePayload({ name: "ig", format: "image", destination: "instagram_direct", page_id: "P", image_hash: "H" }) as any;
+    expect(ig.object_story_spec.link_data.call_to_action).toEqual({ type: "INSTAGRAM_MESSAGE", value: { app_destination: "INSTAGRAM_DIRECT", link: "https://www.instagram.com" } });
+    expect(ig.asset_feed_spec).toBeUndefined();
+    const m = buildCreativePayload({ name: "m", format: "image", destination: "messenger", page_id: "P", image_hash: "H" }) as any;
+    expect(m.object_story_spec.link_data.call_to_action).toEqual({ type: "MESSAGE_PAGE", value: { app_destination: "MESSENGER" } });
+    expect(m.object_story_spec.link_data.link).toBe("https://fb.com/messenger_doc/");
+  });
+  it("text versions use DEGREES_OF_FREEDOM and drop duplicates", () => {
+    const p = buildCreativePayload({
+      name: "v", format: "video", destination: "whatsapp", page_id: "P", video_id: "V", thumbnail_hash: "T",
+      primary_text: "a", primary_texts: ["b", "a"], headline: "h",
+    }) as any;
+    expect(p.asset_feed_spec).toEqual({ optimization_type: "DEGREES_OF_FREEDOM", bodies: [{ text: "a" }, { text: "b" }], titles: [{ text: "h" }] });
+  });
+  it("creative features are named one by one; the retired bundle is refused and stripped from copies", () => {
+    const p = buildCreativePayload({ name: "f", format: "image", destination: "whatsapp", page_id: "P", image_hash: "H", creative_features: { image_touchups: true, inline_comment: false } }) as any;
+    expect(p.degrees_of_freedom_spec).toEqual({ creative_features_spec: { image_touchups: { enroll_status: "OPT_IN" }, inline_comment: { enroll_status: "OPT_OUT" } } });
+    expect(() => buildCreativePayload({ name: "f", format: "image", destination: "whatsapp", page_id: "P", image_hash: "H", creative_features: { standard_enhancements: true } })).toThrow(/retired/);
+    expect(sanitizeDegreesOfFreedom({ creative_features_spec: { standard_enhancements: { enroll_status: "OPT_IN" } } })).toBeUndefined();
+    expect(sanitizeDegreesOfFreedom({ creative_features_spec: { standard_enhancements: {}, video_auto_crop: { enroll_status: "OPT_IN" } } })).toEqual({
+      creative_features_spec: { video_auto_crop: { enroll_status: "OPT_IN" } },
+    });
   });
 });
 

@@ -17,6 +17,23 @@ export const targetingInput = z
     radius_km: z.number().min(1).max(80).optional().describe("Radius around each city in km."),
     countries: z.array(z.string().length(2)).optional().describe("ISO country codes, e.g. ['PK']."),
     region_keys: z.array(z.string()).optional(),
+    pins: z
+      .array(
+        z.object({
+          latitude: z.number().min(-90).max(90),
+          longitude: z.number().min(-180).max(180),
+          radius_km: z.number().min(1).max(80),
+          name: z.string().max(200).optional().describe("Label for your own reference, e.g. 'DHA Karachi'."),
+        }),
+      )
+      .max(200)
+      .optional()
+      .describe("Map pins: an area around a point (e.g. a neighbourhood). Check the coordinates are in the right city."),
+    place_keys: z
+      .array(z.object({ key: z.string(), radius_km: z.number().min(1).max(80).optional() }))
+      .max(200)
+      .optional()
+      .describe("Meta place keys (search_locations with location_types ['place']), optionally with a radius."),
     location_types: z.array(z.enum(["home", "recent", "travel_in"])).optional(),
     age_min: z.number().int().min(18).max(65).optional(),
     age_max: z.number().int().min(18).max(65).optional(),
@@ -59,6 +76,50 @@ export const welcomeFields = {
   icebreakers: z.array(z.string().max(80)).max(4).optional().describe("Up to 4 quick questions, e.g. 'Price?'"),
 };
 
+export const messagingApp = z.enum(["whatsapp", "instagram_direct", "messenger"]);
+export type MessagingApp = z.infer<typeof messagingApp>;
+
+/** Ad set destinations. The MESSAGING_* values send people to several apps; Meta picks the best one per person. */
+export const adsetDestination = z.enum([
+  "WHATSAPP",
+  "INSTAGRAM_DIRECT",
+  "MESSENGER",
+  "MESSAGING_INSTAGRAM_DIRECT_WHATSAPP",
+  "MESSAGING_MESSENGER_WHATSAPP",
+  "MESSAGING_INSTAGRAM_DIRECT_MESSENGER",
+  "MESSAGING_INSTAGRAM_DIRECT_MESSENGER_WHATSAPP",
+  "WEBSITE",
+  "ON_AD",
+]);
+
+export const messagingAppsField = z
+  .array(messagingApp)
+  .min(1)
+  .max(3)
+  .optional()
+  .describe(
+    "Messaging apps people can reach you on, e.g. ['whatsapp','instagram_direct']. Two or more = one button per app, Meta picks per person. " +
+      "Must match the ad set's destination (WHATSAPP + INSTAGRAM_DIRECT = MESSAGING_INSTAGRAM_DIRECT_WHATSAPP).",
+  );
+
+export const textVariationFields = {
+  primary_texts: z
+    .array(z.string().max(2200))
+    .max(5)
+    .optional()
+    .describe("Extra primary-text versions (up to 5 in total with primary_text); Meta shows the best one per person."),
+  headlines: z.array(z.string().max(255)).max(5).optional().describe("Extra headline versions (up to 5 in total with headline)."),
+};
+
+export const creativeFeaturesField = z
+  .record(z.string().regex(/^[a-z_]+$/), z.boolean())
+  .optional()
+  .describe(
+    "Advantage+ creative features, each on (true) or off (false), e.g. {text_optimizations: true, video_auto_crop: true, " +
+      "image_touchups: true, inline_comment: true, enhance_cta: true}. Leave out to use Meta's defaults. " +
+      "The old 'standard_enhancements' bundle is retired by Meta: name the features one by one.",
+  );
+
 export const ctaTypes = z.enum([
   "WHATSAPP_MESSAGE",
   "SHOP_NOW",
@@ -92,7 +153,11 @@ export const carouselCard = z.object({
 export const creativeInput = z.object({
   name: z.string().min(1).max(400),
   format: z.enum(["image", "video", "carousel", "instagram_post", "dynamic"]),
-  destination: z.enum(["whatsapp", "website"]).default("whatsapp"),
+  destination: z
+    .enum(["whatsapp", "instagram_direct", "messenger", "website"])
+    .default("whatsapp")
+    .describe("Where the button sends people. For several messaging apps, use messaging_apps instead."),
+  messaging_apps: messagingAppsField,
   page_id: metaId.optional().describe("Defaults to the configured Sandalez Page."),
   instagram_user_id: metaId.optional().describe("Defaults to the configured Instagram account."),
   ...mediaRef.shape,
@@ -114,6 +179,8 @@ export const creativeInput = z.object({
     })
     .optional()
     .describe("Dynamic creative (DCO): Meta mixes these assets. The ad set must have is_dynamic_creative: true."),
+  ...textVariationFields,
+  creative_features: creativeFeaturesField,
   ...welcomeFields,
 });
 export type CreativeInput = z.infer<typeof creativeInput>;
@@ -151,7 +218,12 @@ export const createAdsetInput = z.object({
   name: z.string().min(1).max(400),
   daily_budget: pkr.optional().describe("PKR per day. Omit only if the campaign has its own budget."),
   targeting: targetingInput,
-  destination: z.enum(["WHATSAPP", "WEBSITE", "MESSENGER", "INSTAGRAM_DIRECT", "ON_AD"]).default("WHATSAPP"),
+  destination: adsetDestination
+    .default("WHATSAPP")
+    .describe(
+      "Where ads send people. WHATSAPP / INSTAGRAM_DIRECT / MESSENGER for one app; MESSAGING_INSTAGRAM_DIRECT_WHATSAPP etc. for several " +
+        "(the ads then need a creative with the same messaging_apps). WEBSITE or ON_AD otherwise.",
+    ),
   optimization_goal: optimizationGoal.optional(),
   billing_event: z.enum(["IMPRESSIONS", "LINK_CLICKS", "THRUPLAY"]).default("IMPRESSIONS"),
   bid_strategy: z
@@ -181,10 +253,18 @@ export const ctwaCreative = z.object({
   thumbnail_hash: z.string().optional(),
   headline: z.string().max(255).optional(),
   primary_text: z.string().max(2200).optional(),
+  ...textVariationFields,
 });
 
 export const createCtwaInput = z.object({
   name: z.string().min(1).max(400).describe("Campaign name, e.g. SZ-KHI-Prospecting-WA"),
+  objective: z
+    .enum(["OUTCOME_ENGAGEMENT", "OUTCOME_SALES"])
+    .default("OUTCOME_ENGAGEMENT")
+    .describe("OUTCOME_ENGAGEMENT (default) or OUTCOME_SALES (Sales objective, still optimising for chats)."),
+  messaging_apps: messagingAppsField.describe(
+    "Default ['whatsapp']. ['whatsapp','instagram_direct'] sends people to WhatsApp or Instagram DMs (one button per app).",
+  ),
   adset_name: z.string().max(400).optional(),
   daily_budget: pkr.describe("PKR per day for the ad set, e.g. 600"),
   city: z.string().optional().describe("City name, default from Settings (Karachi)."),
@@ -201,6 +281,8 @@ export const createCtwaInput = z.object({
   creatives: z.array(ctwaCreative).min(1).max(10),
   headline: z.string().max(255).optional().describe("Default headline for creatives that have none."),
   primary_text: z.string().max(2200).optional().describe("Default primary text for creatives that have none."),
+  ...textVariationFields,
+  creative_features: creativeFeaturesField,
   ...welcomeFields,
 });
 

@@ -27,6 +27,7 @@ The tool manages only your own ad account, so the default **Marketing API Access
    | `WHATSAPP_PHONE_NUMBER` | e.g. `923499066816` |
 
 9. Turn on **two-factor authentication** on the admin Facebook account.
+10. **Switch the app to Live.** In the App Dashboard, open **App settings → Basic**, fill in **Privacy Policy URL** (e.g. `https://sandalez.com/policies/privacy-policy`) and pick a **Category**, then turn the **App Mode** switch at the top from Development to **Live**. While the app is in development mode, Meta refuses ads whose post was made through it: "Ads creative post was created by an app that is in development mode. It must be in public to create this ad." Live mode needs no App Review for your own ad account.
 
 Then run `pnpm setup:check --env .env`. It checks the token (valid, permissions, expiry), the ad account (PKR, Asia/Karachi, active) and that every ID above is visible to the token, and names the exact fix when one is not (e.g. "the token cannot see Page 123; assign the Page to the system user"). Once deployed, Claude's `check_token` tool should also say `healthy: true`.
 

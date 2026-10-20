@@ -27,7 +27,15 @@ export * as webhooksService from "./services/webhooks.js";
 export * as dashboardService from "./services/dashboard.js";
 export * as settingsService from "./services/settings.js";
 export { createCtwaCampaign } from "./services/ctwa.js";
-export { buildCreativePayload, buildWelcomeMessage, WHATSAPP_LINK } from "./services/creative-payload.js";
+export {
+  appsForCreative,
+  appsForDestinationType,
+  buildCreativePayload,
+  buildWelcomeMessage,
+  destinationTypeForApps,
+  sanitizeDegreesOfFreedom,
+  WHATSAPP_LINK,
+} from "./services/creative-payload.js";
 
 export { tools, toolMap, type ToolDef, type ToolLevel, type ToolName } from "./tools/registry.js";
 export { runTool, runAction, formatZodError, type ToolOutcome } from "./tools/runner.js";

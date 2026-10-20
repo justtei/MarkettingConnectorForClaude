@@ -211,9 +211,11 @@ export const tools = [
     phase: 1,
     level: "draft",
     description:
-      "One call builds a complete click-to-WhatsApp campaign (all PAUSED): uploads media, creates campaign (OUTCOME_ENGAGEMENT), ad set " +
-      "(WhatsApp destination, CONVERSATIONS, city/age/gender targeting, daily budget in PKR), one creative + ad per media file, with the " +
-      "WhatsApp welcome message. Rolls back everything if any step fails. Budget must be within the cap. Activate later with set_status.",
+      "One call builds a complete click-to-message campaign (all PAUSED): uploads media, creates the campaign (OUTCOME_ENGAGEMENT, or " +
+      "OUTCOME_SALES), an ad set (CONVERSATIONS, city/age/gender targeting, daily budget in PKR) and one creative + ad per media file, with " +
+      "the welcome message. WhatsApp by default; messaging_apps ['whatsapp','instagram_direct'] (or messenger) gives one button per app " +
+      "and Meta picks per person. Optional extra text versions (primary_texts, headlines) and Advantage+ creative features. " +
+      "Rolls back everything if any step fails. Budget must be within the cap. Activate later with set_status.",
     input: createCtwaInput,
     handler: (ctx, i) => createCtwaCampaign(ctx, i),
   }),
@@ -234,7 +236,11 @@ export const tools = [
     phase: 1,
     level: "draft",
     description:
-      "Create an ad set (always PAUSED) with budget in PKR, targeting and destination. For WHATSAPP the Page + WhatsApp number are filled in automatically and optimization defaults to CONVERSATIONS.",
+      "Create an ad set (always PAUSED) with budget in PKR, targeting and destination. Messaging destinations: WHATSAPP, INSTAGRAM_DIRECT, " +
+      "MESSENGER, or several apps at once (MESSAGING_INSTAGRAM_DIRECT_WHATSAPP, MESSAGING_MESSENGER_WHATSAPP, MESSAGING_INSTAGRAM_DIRECT_MESSENGER, " +
+      "MESSAGING_INSTAGRAM_DIRECT_MESSENGER_WHATSAPP). The Page and WhatsApp number are filled in automatically and optimization defaults to " +
+      "CONVERSATIONS. Targeting takes cities, map pins (pins: latitude/longitude/radius_km) and place keys. The destination can't be changed " +
+      "later: to switch apps, create a new ad set.",
     input: createAdsetInput,
     handler: (ctx, i) => campaigns.createAdset(ctx, i),
   }),
@@ -246,7 +252,9 @@ export const tools = [
     level: "draft",
     description:
       "Create an ad creative: image, video, carousel (2-10 cards), instagram_post (reuse an existing IG post) or dynamic (DCO). " +
-      "Destination whatsapp adds the WhatsApp button and welcome message; media URLs are uploaded automatically.",
+      "destination whatsapp / instagram_direct / messenger adds that app's button and the welcome message; messaging_apps with two or more " +
+      "apps adds one button per app (image/video), matching an ad set with the same apps. primary_texts / headlines add text versions; " +
+      "creative_features turns individual Advantage+ creative features on or off. Media URLs are uploaded automatically.",
     input: creativeInput,
     handler: (ctx, i) => campaigns.createCreative(ctx, i),
   }),
@@ -256,7 +264,9 @@ export const tools = [
     group: "Campaigns",
     phase: 1,
     level: "draft",
-    description: "Create an ad (always PAUSED) from an ad set and a creative.",
+    description:
+      "Create an ad (always PAUSED) from an ad set and a creative. The creative's buttons must go to the same messaging apps as the ad set's " +
+      "destination; if not, the error says which ad set destination or messaging_apps to use. An existing creative can be reused.",
     input: createAdInput,
     handler: (ctx, i) => campaigns.createAd(ctx, i),
   }),
@@ -390,7 +400,10 @@ export const tools = [
     group: "Campaigns",
     phase: 2,
     level: "draft",
-    description: "Deep-copy a campaign with its ad sets and ads (PAUSED). Optionally rename it, retarget to another city (e.g. Lahore) and set a new daily budget.",
+    description:
+      "Deep-copy a campaign with its ad sets and ads (PAUSED), keeping each ad set's destination (e.g. Instagram + WhatsApp). Optionally rename " +
+      "it, retarget to another city (e.g. Lahore) and set a new daily budget. If Meta's own copy refuses the campaign (e.g. retired creative " +
+      "settings), it is rebuilt object by object instead (method: rebuilt).",
     input: z.object({
       campaign_id: metaId,
       new_name: z.string().max(400).optional(),

@@ -51,7 +51,9 @@ export function creativeSummary(cr: any): {
   const oss = cr?.object_story_spec ?? {};
   const link = oss.link_data;
   const video = oss.video_data;
-  if (cr?.asset_feed_spec) {
+  // A real dynamic creative keeps its media in asset_feed_spec. Multi-destination and text-version creatives
+  // keep media in object_story_spec and only add buttons / texts there, so they fall through to video / image.
+  if (cr?.asset_feed_spec && !video && !link) {
     const f = cr.asset_feed_spec;
     return {
       type: "dynamic",

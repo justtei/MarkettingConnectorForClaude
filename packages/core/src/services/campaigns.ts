@@ -6,7 +6,14 @@ import { fromMinorUnits, toMinorUnits } from "../meta/money.js";
 import type { createAdInput, createAdsetInput, createCampaignInput, CreativeInput } from "../schemas.js";
 import { getCurrency } from "./account.js";
 import { getVideoThumbnail, uploadImage, uploadVideo, waitForVideoReady } from "./assets.js";
-import { buildCreativePayload, type ResolvedCreative } from "./creative-payload.js";
+import {
+  appsForCreative,
+  appsForDestinationType,
+  buildCreativePayload,
+  destinationTypeForApps,
+  type MessagingApp,
+  type ResolvedCreative,
+} from "./creative-payload.js";
 import {
   AD_FIELDS,
   ADSET_FIELDS,
@@ -62,12 +69,22 @@ export async function createCampaign(ctx: CoreContext, input: CreateCampaign) {
 // ---------------------------------------------------------------- ad set
 
 const DEFAULT_OPTIMIZATION: Record<string, string> = {
-  WHATSAPP: "CONVERSATIONS",
-  MESSENGER: "CONVERSATIONS",
-  INSTAGRAM_DIRECT: "CONVERSATIONS",
   WEBSITE: "LINK_CLICKS",
   ON_AD: "POST_ENGAGEMENT",
 };
+
+/** promoted_object for messaging ad sets: the Page, plus the WhatsApp number when WhatsApp is one of the apps. */
+function messagingPromotedObject(ctx: CoreContext, apps: MessagingApp[], objective: string | undefined) {
+  if (!ctx.config.META_PAGE_ID) throw new UserInputError("META_PAGE_ID is not configured.");
+  const promoted: Record<string, unknown> = { page_id: ctx.config.META_PAGE_ID };
+  if (apps.includes("whatsapp")) {
+    if (!ctx.config.WHATSAPP_PHONE_NUMBER) throw new UserInputError("WHATSAPP_PHONE_NUMBER is not configured.");
+    promoted.whatsapp_phone_number = ctx.config.WHATSAPP_PHONE_NUMBER;
+  }
+  // Sales campaigns that optimise for chats record purchases from the conversations (as Ads Manager sets it).
+  if (objective === "OUTCOME_SALES") promoted.custom_event_type = "PURCHASE";
+  return promoted;
+}
 
 export async function createAdsetRaw(ctx: CoreContext, input: CreateAdset) {
   const type = await resolveOwnedObject(ctx, input.campaign_id);
@@ -89,14 +106,19 @@ export async function createAdsetRaw(ctx: CoreContext, input: CreateAdset) {
   validateTargetingSpec(targeting);
 
   const destination = input.destination ?? "WHATSAPP";
-  const optimization = input.optimization_goal ?? DEFAULT_OPTIMIZATION[destination] ?? "LINK_CLICKS";
+  const apps = appsForDestinationType(destination);
+  const optimization = input.optimization_goal ?? (apps.length ? "CONVERSATIONS" : DEFAULT_OPTIMIZATION[destination] ?? "LINK_CLICKS");
+  if (apps.length > 1) {
+    if (optimization !== "CONVERSATIONS") throw new UserInputError("Ad sets for several messaging apps must optimise for CONVERSATIONS.");
+    if (!["OUTCOME_ENGAGEMENT", "OUTCOME_SALES", "OUTCOME_TRAFFIC"].includes(campaign.objective)) {
+      throw new UserInputError(`Several messaging apps need an Engagement, Sales or Traffic campaign (this one is ${campaign.objective}).`);
+    }
+  }
   let promoted = input.promoted_object;
   if (!promoted) {
-    if (destination === "WHATSAPP") {
-      if (!ctx.config.META_PAGE_ID) throw new UserInputError("META_PAGE_ID is not configured.");
-      if (!ctx.config.WHATSAPP_PHONE_NUMBER) throw new UserInputError("WHATSAPP_PHONE_NUMBER is not configured.");
-      promoted = { page_id: ctx.config.META_PAGE_ID, whatsapp_phone_number: ctx.config.WHATSAPP_PHONE_NUMBER };
-    } else if (destination === "MESSENGER" || destination === "INSTAGRAM_DIRECT" || destination === "ON_AD") {
+    if (apps.length) {
+      promoted = messagingPromotedObject(ctx, apps, campaign.objective);
+    } else if (destination === "ON_AD") {
       if (!ctx.config.META_PAGE_ID) throw new UserInputError("META_PAGE_ID is not configured.");
       promoted = { page_id: ctx.config.META_PAGE_ID };
     } else if (optimization === "OFFSITE_CONVERSIONS" || optimization === "VALUE") {
@@ -152,6 +174,10 @@ export async function resolveCreative(ctx: CoreContext, input: CreativeInput): P
     name: input.name,
     format: input.format,
     destination: input.destination ?? "whatsapp",
+    messaging_apps: input.messaging_apps,
+    primary_texts: input.primary_texts,
+    headlines: input.headlines,
+    creative_features: input.creative_features,
     page_id: pageId,
     instagram_user_id: input.instagram_user_id ?? ctx.config.META_INSTAGRAM_USER_ID,
     headline: input.headline,
@@ -231,6 +257,7 @@ export async function createCreative(ctx: CoreContext, input: CreativeInput) {
 export async function createAdRaw(ctx: CoreContext, input: CreateAd) {
   const type = await resolveOwnedObject(ctx, input.adset_id);
   if (type !== "adset" && type !== "unknown") throw new UserInputError(`${input.adset_id} is a ${type}, not an ad set.`);
+  await checkCreativeFitsAdset(ctx, input.adset_id, input.creative_id);
   const params = forcePaused({ name: input.name, adset_id: input.adset_id, creative: { creative_id: input.creative_id } });
   const res = await ctx.meta.post<{ id: string }>(`${ctx.config.META_AD_ACCOUNT_ID}/ads`, params);
   rememberOwned(ctx, res.id, "ad");
@@ -242,6 +269,31 @@ export async function createAdRaw(ctx: CoreContext, input: CreateAd) {
   }
   await mirrorAd(ctx, { id: res.id, name: input.name, adset_id: input.adset_id, status: "PAUSED", creative: { id: input.creative_id } });
   return { ad_id: res.id, name: input.name, adset_id: input.adset_id, creative_id: input.creative_id, status: "PAUSED" as const };
+}
+
+const APP_LABEL: Record<MessagingApp, string> = { whatsapp: "WhatsApp", instagram_direct: "Instagram DMs", messenger: "Messenger" };
+const appList = (apps: MessagingApp[]) => (apps.length ? apps.map((a) => APP_LABEL[a]).join(" + ") : "a website / no messaging app");
+
+/**
+ * Meta refuses an ad whose buttons don't match its ad set's messaging destination
+ * ("The campaign destination type must be consistent with app destination in call to action").
+ * Checked first so the error says exactly what to change.
+ */
+async function checkCreativeFitsAdset(ctx: CoreContext, adsetId: string, creativeId: string) {
+  const [adset, creative] = await Promise.all([
+    ctx.meta.get<any>(adsetId, { fields: "id,destination_type" }),
+    ctx.meta.get<any>(creativeId, { fields: "id,object_story_spec,asset_feed_spec,call_to_action_type" }),
+  ]);
+  const want = appsForDestinationType(adset.destination_type);
+  if (!want.length) return;
+  const have = appsForCreative(creative);
+  if (!have.length) return; // e.g. an Instagram post creative whose buttons Meta doesn't return; let Meta decide
+  if (want.length === have.length && want.every((a) => have.includes(a))) return;
+  throw new UserInputError(
+    `This creative's buttons go to ${appList(have)}, but the ad set (destination ${adset.destination_type}) sends people to ${appList(want)}. ` +
+      `Either create a creative with messaging_apps ${JSON.stringify(want)}, or put this creative in an ad set with destination ` +
+      `${destinationTypeForApps(have)}.`,
+  );
 }
 
 export async function createAd(ctx: CoreContext, input: CreateAd) {

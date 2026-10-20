@@ -7,15 +7,16 @@ import { audited } from "../audit.js";
 import type { CoreContext } from "../context.js";
 import { checkDailyBudget, UserInputError } from "../guards.js";
 import { describeError } from "../meta/errors.js";
-import type { createCtwaInput } from "../schemas.js";
+import type { adsetDestination, createCtwaInput } from "../schemas.js";
 import { getCurrency } from "./account.js";
 import { getVideoThumbnail, uploadImage, uploadVideo, waitForVideoReady } from "./assets.js";
 import { createAdRaw, createAdsetRaw, createCampaignRaw, createCreativeRaw } from "./campaigns.js";
-import type { ResolvedCreative } from "./creative-payload.js";
+import { destinationTypeForApps, sortApps, type MessagingApp, type ResolvedCreative } from "./creative-payload.js";
 import { getSettings } from "./settings.js";
 import { resolveCityKey } from "./targeting.js";
 
 type CtwaInput = z.input<typeof createCtwaInput>;
+type CreateAdsetDestination = z.input<typeof adsetDestination>;
 
 interface Created {
   type: "campaign" | "adset" | "creative" | "ad";
@@ -29,7 +30,11 @@ export async function createCtwaCampaign(ctx: CoreContext, input: CtwaInput) {
 async function run(ctx: CoreContext, input: CtwaInput) {
   // ---- pre-flight checks (no Meta writes yet)
   if (!ctx.config.META_PAGE_ID) throw new UserInputError("META_PAGE_ID is not configured; click-to-WhatsApp needs the Page.");
-  if (!ctx.config.WHATSAPP_PHONE_NUMBER) throw new UserInputError("WHATSAPP_PHONE_NUMBER is not configured.");
+  const apps: MessagingApp[] = sortApps(input.messaging_apps?.length ? input.messaging_apps : ["whatsapp"]);
+  if (apps.includes("whatsapp") && !ctx.config.WHATSAPP_PHONE_NUMBER) throw new UserInputError("WHATSAPP_PHONE_NUMBER is not configured.");
+  if (apps.includes("instagram_direct") && !ctx.config.META_INSTAGRAM_USER_ID) {
+    throw new UserInputError("META_INSTAGRAM_USER_ID is not configured; Instagram DMs need the Instagram account.");
+  }
   const settings = await getSettings(ctx);
   checkDailyBudget(settings, input.daily_budget);
   await getCurrency(ctx);
@@ -80,7 +85,7 @@ async function run(ctx: CoreContext, input: CtwaInput) {
   // ---- steps 2-5 with rollback
   const created: Created[] = [];
   try {
-    const campaign = await createCampaignRaw(ctx, { name: input.name, objective: "OUTCOME_ENGAGEMENT", special_ad_categories: [] });
+    const campaign = await createCampaignRaw(ctx, { name: input.name, objective: input.objective ?? "OUTCOME_ENGAGEMENT", special_ad_categories: [] });
     created.push({ type: "campaign", id: campaign.campaign_id });
     steps.push(`campaign ${campaign.campaign_id}`);
 
@@ -89,7 +94,7 @@ async function run(ctx: CoreContext, input: CtwaInput) {
       campaign_id: campaign.campaign_id,
       name: adsetName,
       daily_budget: input.daily_budget,
-      destination: "WHATSAPP",
+      destination: destinationTypeForApps(apps) as CreateAdsetDestination,
       optimization_goal: "CONVERSATIONS",
       billing_event: "IMPRESSIONS",
       bid_strategy: "LOWEST_COST_WITHOUT_CAP",
@@ -115,7 +120,8 @@ async function run(ctx: CoreContext, input: CtwaInput) {
       const resolved: ResolvedCreative = {
         name,
         format: c.type,
-        destination: "whatsapp",
+        destination: apps[0]!,
+        messaging_apps: apps,
         page_id: ctx.config.META_PAGE_ID,
         instagram_user_id: ctx.config.META_INSTAGRAM_USER_ID,
         image_hash: m.image_hash,
@@ -124,6 +130,9 @@ async function run(ctx: CoreContext, input: CtwaInput) {
         thumbnail_url: m.thumbnail_url,
         headline: c.headline ?? input.headline,
         primary_text: c.primary_text ?? input.primary_text,
+        primary_texts: c.primary_texts ?? input.primary_texts,
+        headlines: c.headlines ?? input.headlines,
+        creative_features: input.creative_features,
         welcome: {
           welcome_message: input.welcome_message,
           autofill_message: input.autofill_message,
@@ -144,6 +153,7 @@ async function run(ctx: CoreContext, input: CtwaInput) {
       ads,
       status: "PAUSED" as const,
       daily_budget_pkr: input.daily_budget,
+      messaging_apps: apps,
       targeting_summary: { city: cityName ?? cityKey, city_key: cityKey, age_min: ageMin, age_max: ageMax, gender },
       steps,
       next_step:

@@ -39,6 +39,23 @@ More examples:
 - "Retarget people who visited the website in the last 30 days with the catalog." → `create_custom_audience`, `create_catalog_campaign`
 - "Make a 1% lookalike of my customer list." → `create_custom_audience` (customer list; phone numbers and emails are normalised and hashed before upload), `create_lookalike`
 
+### Instagram DMs, Messenger, or several apps at once
+
+Ads can send people to WhatsApp, Instagram DMs or Messenger, or to several of them. With several, each ad gets one button per app and Meta picks the best one for each person.
+
+> Make a Sales campaign for the "Which Pair Is Yours?" video, Instagram + WhatsApp, PKR 600/day, women 20–40 in Karachi, with 3 versions of the text.
+
+Claude calls `create_ctwa_campaign` with `objective: OUTCOME_SALES`, `messaging_apps: ["whatsapp","instagram_direct"]` and `primary_texts`. The ad set and the ad must name the same apps: an Instagram + WhatsApp ad set (`MESSAGING_INSTAGRAM_DIRECT_WHATSAPP`) needs an ad with both buttons. If they don't match, the tool says which one to change before Meta is called. Meta doesn't let an ad set's destination change later, so switching apps means a new ad set.
+
+Also available:
+
+| Ask | What it uses |
+|---|---|
+| "Target 3 km around Gulistan-e-Johar and DHA" | map pins (`pins`: latitude, longitude, radius) |
+| "Give the ad 3 versions of the text and 2 headlines" | `primary_texts`, `headlines` |
+| "Turn on text improvements and auto-crop, but not comments" | `creative_features` (Advantage+ creative features, one by one; Meta retired the old all-in-one "standard enhancements") |
+| "Copy the 10 Oct campaign" | `duplicate_campaign`. If Meta's own copy refuses an older campaign, the tool rebuilds it piece by piece (`method: rebuilt`) |
+
 ### Day-to-day management
 
 - "Pause the Lahore ad set." Pausing is safe, so it's done right away.

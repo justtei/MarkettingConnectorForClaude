@@ -10,10 +10,12 @@ import {
   resolveOwnedObject,
   UserInputError,
 } from "../guards.js";
+import { describeError, MetaApiError } from "../meta/errors.js";
 import { fromMinorUnits, toMinorUnits } from "../meta/money.js";
 import type { budgetInput, statusInput, targetingUpdateInput, TargetingInput } from "../schemas.js";
 import { getCurrency } from "./account.js";
 import { getCampaignTree, readObject } from "./campaigns.js";
+import { rebuildCampaignCopy } from "./duplicate.js";
 import { mirrorStatus } from "./mirror.js";
 import { getSettings } from "./settings.js";
 import { buildTargeting, mergeTargeting, resolveCityKey, validateTargetingSpec } from "./targeting.js";
@@ -207,33 +209,53 @@ export async function duplicateCampaign(
   }
 
   return audited(ctx, "duplicate_campaign", { objectId: input.campaign_id, request: input }, async () => {
-    const copy = await ctx.meta.post<{ copied_campaign_id: string; ad_object_ids?: any[] }>(`${input.campaign_id}/copies`, {
-      deep_copy: true,
-      status_option: "PAUSED",
-      rename_options: { rename_strategy: "DEEP_RENAME", rename_suffix: " - Copy" },
-    });
-    const newId = copy.copied_campaign_id;
-    if (!newId) throw new Error("Meta did not return the copied campaign ID.");
-    rememberOwned(ctx, newId, "campaign");
-    if (input.new_name) await ctx.meta.post(newId, { name: input.new_name });
-
     const currency = await getCurrency(ctx);
-    const adsets = await ctx.meta.getAll<any>(`${newId}/adsets`, { fields: "id,name,targeting,daily_budget" }, 500);
-    for (const s of adsets) {
-      rememberOwned(ctx, s.id, "adset");
-      const update: Record<string, unknown> = {};
-      if (cityKey) {
-        const t = { ...(s.targeting ?? {}) };
-        t.geo_locations = { cities: [{ key: cityKey }], location_types: t.geo_locations?.location_types ?? ["home", "recent"] };
-        update.targeting = t;
-        if (cityName) update.name = `${String(s.name).replace(/ - Copy$/, "")} | ${cityName}`;
-      }
-      if (input.daily_budget !== undefined && Number(s.daily_budget ?? 0) > 0) {
-        update.daily_budget = toMinorUnits(input.daily_budget, currency);
-      }
-      if (Object.keys(update).length) await ctx.meta.post(s.id, update);
+    let copy: { copied_campaign_id: string } | null = null;
+    let fallback: { reason: string; notes: string[] } | null = null;
+    let newId: string;
+    try {
+      copy = await ctx.meta.post<{ copied_campaign_id: string }>(`${input.campaign_id}/copies`, {
+        deep_copy: true,
+        status_option: "PAUSED",
+        rename_options: { rename_strategy: "DEEP_RENAME", rename_suffix: " - Copy" },
+      });
+    } catch (err) {
+      if (!(err instanceof MetaApiError)) throw err;
+      // Meta's copy refuses some older ads (retired creative settings, posts made by a development-mode app).
+      ctx.log.warn({ err: err.message }, "Meta /copies failed; rebuilding the copy object by object");
+      const source = await ctx.meta.get<any>(input.campaign_id, { fields: "name" });
+      const rebuilt = await rebuildCampaignCopy(ctx, input.campaign_id, {
+        name: input.new_name ?? `${source.name} - Copy`,
+        cityKey,
+        cityName,
+        dailyBudgetMinor: input.daily_budget !== undefined ? toMinorUnits(input.daily_budget, currency) : undefined,
+      });
+      fallback = { reason: describeError(err).message, notes: rebuilt.notes };
+      newId = rebuilt.campaign_id;
     }
-    const tree = await getCampaignTree(ctx, newId);
+    if (copy) {
+      newId = copy.copied_campaign_id;
+      if (!newId) throw new Error("Meta did not return the copied campaign ID.");
+      rememberOwned(ctx, newId, "campaign");
+      if (input.new_name) await ctx.meta.post(newId, { name: input.new_name });
+
+      const adsets = await ctx.meta.getAll<any>(`${newId}/adsets`, { fields: "id,name,targeting,daily_budget" }, 500);
+      for (const s of adsets) {
+        rememberOwned(ctx, s.id, "adset");
+        const update: Record<string, unknown> = {};
+        if (cityKey) {
+          const t = { ...(s.targeting ?? {}) };
+          t.geo_locations = { cities: [{ key: cityKey }], location_types: t.geo_locations?.location_types ?? ["home", "recent"] };
+          update.targeting = t;
+          if (cityName) update.name = `${String(s.name).replace(/ - Copy$/, "")} | ${cityName}`;
+        }
+        if (input.daily_budget !== undefined && Number(s.daily_budget ?? 0) > 0) {
+          update.daily_budget = toMinorUnits(input.daily_budget, currency);
+        }
+        if (Object.keys(update).length) await ctx.meta.post(s.id, update);
+      }
+    }
+    const tree = await getCampaignTree(ctx, newId!);
     if (!tree.adsets.length) {
       ctx.log.warn({ newId }, "Copied campaign has no ad sets (deep copy may still be running)");
     }
@@ -243,6 +265,8 @@ export async function duplicateCampaign(
       name: tree.name,
       status: "PAUSED",
       city: cityName ?? null,
+      method: fallback ? "rebuilt" : "meta_copy",
+      ...(fallback ? { meta_copy_error: fallback.reason, notes: fallback.notes } : {}),
       adsets: tree.adsets.map((s) => ({ id: s.id, name: s.name, daily_budget: s.daily_budget, ads: s.ads.length })),
     };
   }, (r) => r.campaign_id);
