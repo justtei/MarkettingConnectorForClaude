@@ -86,6 +86,20 @@ Then see [usage.md](usage.md).
 | Restore a backup | `& "D:\PostgreSQL\17\bin\psql.exe" -h localhost -U sandalez -d sandalez -v ON_ERROR_STOP=1 -f backup.sql` |
 | SQL shell | `& "D:\PostgreSQL\17\bin\psql.exe" -h localhost -U sandalez -d sandalez` |
 | Tailscale addresses | `tailscale funnel status` |
+| Watchdog log | `Get-Content logs\watchdog.log -Tail 20` |
+| Run the watchdog now | `Start-ScheduledTask "Sandalez Watchdog"` |
 | Remove the services | `... install.ps1 -Uninstall` (keeps PostgreSQL, the data and `.env`) |
 
 **Keep the PC on.** claude.ai can reach the tool only while the PC is running and online. Set Settings → System → Power & sleep → **Sleep: Never** (when plugged in), and turn on Tailscale's "Run unattended" option so it stays connected without anyone signed in.
+
+### The watchdog
+
+When the router or internet line reconnects, Tailscale's public Funnel relays can keep a dead route to the PC. claude.ai then says it **can't reach** the connector, although everything on the PC looks fine and `tailscale funnel status` still says "Funnel on". (`curl` from outside gets "Broken pipe".)
+
+`install.ps1 -Funnel` installs the scheduled task **Sandalez Watchdog** (runs as SYSTEM every 3 minutes and at boot). It:
+
+1. starts PostgreSQL, Tailscale or any `sandalez-*` service that has stopped, and restarts the MCP server if it stops answering;
+2. calls `https://<pc>.<tailnet>.ts.net/health` **through the public relays** (resolved with public DNS, the way claude.ai reaches it);
+3. after two failed checks in a row, re-publishes Funnel; if that doesn't help, restarts Tailscale (at most every 10 minutes).
+
+So an outage lasts about 6–10 minutes instead of until someone notices. Only problems and repairs are written to `logs\watchdog.log`. To repair by hand: `Restart-Service Tailscale`.

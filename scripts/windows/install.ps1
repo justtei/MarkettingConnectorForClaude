@@ -12,8 +12,9 @@
     -PgDir D:\PostgreSQL\17 where PostgreSQL goes (default: <repo drive>:\PostgreSQL\17)
     -Funnel                 publish the MCP server at https://<this PC>.<tailnet>.ts.net (claude.ai) and the
                             dashboard at https://<this PC>.<tailnet>.ts.net:8443 (your Tailscale devices only)
+                            With -Funnel it also installs the "Sandalez Watchdog" task (scripts\windows\watchdog.ps1).
     -SkipBuild              only (re)write the services and restart them
-    -Uninstall              remove the four services (keeps PostgreSQL, the database and .env)
+    -Uninstall              remove the four services and the watchdog (keeps PostgreSQL, the database and .env)
   See docs/windows-native.md.
 #>
 param(
@@ -100,6 +101,7 @@ if ($Uninstall) {
   foreach ($s in $Services) {
     if (Get-Service $s.Name -ErrorAction SilentlyContinue) { Stop-App $s.Name; & $Nssm remove $s.Name confirm | Out-Null; Ok "removed $($s.Name)" }
   }
+  Unregister-ScheduledTask -TaskName "Sandalez Watchdog" -Confirm:$false -ErrorAction SilentlyContinue
   if (Test-Path $Tailscale) { & $Tailscale funnel reset 2>$null | Out-Null; & $Tailscale serve reset 2>$null | Out-Null }
   exit 0
 }
@@ -224,6 +226,15 @@ if ($Funnel) {
   Ok "MCP (public):        https://$dns/mcp"
   Ok "dashboard (tailnet): https://${dns}:8443"
   Ok "webhooks (public):   https://$dns/webhooks/whatsapp  (docs/orders.md)"
+
+  # Router/line reconnects can leave the Funnel relays with a dead route to this PC; the watchdog repairs it.
+  $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $Repo 'scripts\windows\watchdog.ps1')`""
+  $every = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 3)
+  $boot = New-ScheduledTaskTrigger -AtStartup
+  $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 10) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+  $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+  Register-ScheduledTask -TaskName "Sandalez Watchdog" -Action $action -Trigger @($every, $boot) -Settings $settings -Principal $principal -Force | Out-Null
+  Ok "watchdog: checks the public address every 3 minutes and repairs it (log: logs\watchdog.log)"
 }
 
 # ------------------------------------------------------------------ services
