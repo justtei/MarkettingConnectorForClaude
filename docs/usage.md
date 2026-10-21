@@ -34,6 +34,9 @@ Reply **yes**. Meta reviews the ads (usually minutes to a few hours) before they
 More examples:
 
 - "Copy the Karachi campaign for Lahore at PKR 500/day." → `duplicate_campaign` (PAUSED)
+- "Where do the ads in the Karachi ad set show?" → `get_placements` (automatic = Advantage+ placements, or the chosen apps and positions)
+- "Show the Karachi ads only on Instagram feed, stories and reels, on phones." → `update_placements` with `platforms: ["instagram"]`, `instagram_positions: ["stream","story","reels"]`, `devices: ["mobile"]` (asks first)
+- "Stop showing on Audience Network." / "Go back to automatic placements." → `update_placements` (`automatic: true` for Advantage+)
 - "Add this new image as a second ad in the Karachi ad set." → `upload_image`, `add_ad_to_adset`
 - "Make a carousel with these 3 product images." → `create_creative` (carousel)
 - "Retarget people who visited the website in the last 30 days with the catalog." → `create_custom_audience`, `create_catalog_campaign`
@@ -88,7 +91,7 @@ Then ask "**What's my real cost per delivered order this week, by ad?**" (`get_c
 
 ### Tool permissions in claude.ai
 
-Under Customize → Connectors → Sandalez Ads, set the tools that change live spend or delete (`set_status`, `update_budget`, `update_targeting`, `bulk_update`, `delete_object`, `update_ad`, `update_adset`, `hide_comment`) to **Needs approval** and the rest to **Always allow**. That way you also click "Allow" in Claude's UI on top of the server's own confirmation. In Claude Code, you approve each tool call unless you allow it in `/permissions`.
+Under Customize → Connectors → Sandalez Ads, set the tools that change live spend or delete (`set_status`, `update_budget`, `update_targeting`, `update_placements`, `bulk_update`, `delete_object`, `update_ad`, `update_adset`, `hide_comment`) to **Needs approval** and the rest to **Always allow**. That way you also click "Allow" in Claude's UI on top of the server's own confirmation. In Claude Code, you approve each tool call unless you allow it in `/permissions`.
 
 The full list of tools with every parameter is in [mcp-tools.md](mcp-tools.md).
 

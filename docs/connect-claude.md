@@ -16,7 +16,7 @@ claude.ai connects from Anthropic's servers, not from your computer, so the MCP 
 - **With request headers** (if your dialog shows a "Request headers" section; Anthropic is rolling it out gradually): URL `https://<MCP_DOMAIN>/mcp`, Authentication **No sign-in**, header `authorization` = `Bearer <MCP_BEARER_TOKEN>` (type the word `Bearer`, a space, then the token).
 - **Otherwise:** URL `https://<MCP_DOMAIN>/mcp/<MCP_PATH_SECRET>`, Authentication **No sign-in**. The secret in the URL is the credential.
 
-To accept only Claude's servers, set `MCP_IP_ALLOWLIST=160.79.104.0/21` (Anthropic's published range; add your own IP if you also use Claude Code from your PC). In each chat, turn the connector on from **+ → Connectors**. Under Customize → Connectors you can set each tool to "Always allow", "Needs approval" or "Blocked"; keep the live tools (`set_status`, `update_budget`, `update_targeting`, `bulk_update`) on "Needs approval".
+To accept only Claude's servers, set `MCP_IP_ALLOWLIST=160.79.104.0/21` (Anthropic's published range; add your own IP if you also use Claude Code from your PC). In each chat, turn the connector on from **+ → Connectors**. Under Customize → Connectors you can set each tool to "Always allow", "Needs approval" or "Blocked"; keep the live tools (`set_status`, `update_budget`, `update_targeting`, `update_placements`, `bulk_update`) on "Needs approval".
 
 ## Claude Code
 

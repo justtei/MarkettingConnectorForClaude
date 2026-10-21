@@ -263,6 +263,68 @@ describe("update_targeting", () => {
   });
 });
 
+describe("placements", () => {
+  it("get_placements reads them; new ad sets start automatic", async () => {
+    const { ok, data } = await call(client, "get_placements", { adset_id: ids.adset });
+    expect(ok, JSON.stringify(data)).toBe(true);
+    expect(data.placements.mode).toBe("automatic");
+  });
+
+  it("update_placements requires confirm", async () => {
+    const { data } = await call(client, "update_placements", { adset_id: ids.adset, platforms: ["instagram"] });
+    expect(data.rule).toBe("confirm_required");
+  });
+
+  it("sets manual placements and keeps the rest of the targeting", async () => {
+    const before = h.mock.objects.get(ids.adset)!.targeting;
+    const { ok, data } = await call(client, "update_placements", {
+      adset_id: ids.adset,
+      platforms: ["facebook", "instagram"],
+      facebook_positions: ["feed", "story"],
+      instagram_positions: ["stream", "story", "reels"],
+      devices: ["mobile"],
+      confirm: true,
+    });
+    expect(ok, JSON.stringify(data)).toBe(true);
+    expect(data.previous_placements.mode).toBe("automatic");
+    expect(data.placements).toMatchObject({ mode: "manual", positions: { facebook: ["feed", "story"], instagram: ["stream", "story", "reels"] } });
+    const t = h.mock.objects.get(ids.adset)!.targeting;
+    expect(t).toMatchObject({ publisher_platforms: ["facebook", "instagram"], instagram_positions: ["stream", "story", "reels"], device_platforms: ["mobile"] });
+    expect(t.geo_locations).toEqual(before.geo_locations);
+  });
+
+  it("new placements replace old positions; the campaign tree shows them", async () => {
+    const { ok } = await call(client, "update_placements", { adset_id: ids.adset, platforms: ["instagram"], confirm: true });
+    expect(ok).toBe(true);
+    const t = h.mock.objects.get(ids.adset)!.targeting;
+    expect(t.publisher_platforms).toEqual(["instagram"]);
+    expect(t.facebook_positions).toBeUndefined();
+    expect(t.instagram_positions).toBeUndefined();
+    expect(t.device_platforms).toBeUndefined();
+    const { data } = await call(client, "get_campaign_tree", { campaign_id: ids.campaign });
+    expect(data.adsets[0].placements).toMatchObject({ mode: "manual", platforms: ["instagram"], positions: { instagram: "all" } });
+  });
+
+  it("automatic: true goes back to Advantage+ placements", async () => {
+    const { ok, data } = await call(client, "update_placements", { adset_id: ids.adset, automatic: true, confirm: true });
+    expect(ok).toBe(true);
+    expect(data.placements.mode).toBe("automatic");
+    expect(h.mock.objects.get(ids.adset)!.targeting.publisher_platforms).toBeUndefined();
+  });
+
+  it("explains an invalid combination without calling Meta", async () => {
+    const { ok, data } = await call(client, "update_placements", { adset_id: ids.adset, facebook_positions: ["marketplace"], confirm: true });
+    expect(ok).toBe(false);
+    expect(data.error).toMatch(/needs Facebook feed/);
+  });
+
+  it("get_placements refuses a campaign ID", async () => {
+    const { ok, data } = await call(client, "get_placements", { adset_id: ids.campaign });
+    expect(ok).toBe(false);
+    expect(data.error).toMatch(/not an ad set/);
+  });
+});
+
 describe("get_insights", () => {
   const seeded = () => [...h.mock.objects.values()].find((o) => o._type === "campaign" && o.name === "SZ-KHI-Existing-WA")!;
 

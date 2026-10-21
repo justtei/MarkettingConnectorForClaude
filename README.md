@@ -2,7 +2,7 @@
 
 A Node.js/TypeScript backend for Meta's Marketing API, scoped to the Sandalez ad account only. It is exposed two ways:
 
-- **an MCP server** that Claude drives from chat (52 tools), and
+- **an MCP server** that Claude drives from chat (54 tools), and
 - **a web dashboard** (mobile-first) for the owner and staff.
 
 Both are thin layers over one core package. That core is the only code that holds the Meta token and calls Meta, so the safety rules and the audit log apply to every change.
@@ -72,7 +72,7 @@ claude mcp add --scope user --transport http sandalez-ads http://localhost:3001/
 | Rule | Enforcement |
 |---|---|
 | Creates are PAUSED | Every campaign, ad set and ad create is forced to `PAUSED`, whatever the input says |
-| Live actions need confirmation | `set_status` ACTIVE/ARCHIVED, `update_budget`, `update_targeting` and `bulk_update` refuse without `confirm: true`. The MCP instructions tell Claude to get your explicit yes first |
+| Live actions need confirmation | `set_status` ACTIVE/ARCHIVED, `update_budget`, `update_targeting`, `update_placements` and `bulk_update` refuse without `confirm: true`. The MCP instructions tell Claude to get your explicit yes first |
 | Budget cap | `MAX_DAILY_BUDGET_PKR` (default 2,000) and `MAX_BUDGET_INCREASE_PCT` (default 30%); editable by the owner in Settings |
 | One ad account | Every object ID is checked against `META_AD_ACCOUNT_ID`; other accounts are refused |
 | Deletes need care | `delete_object` permanently deletes a campaign, ad set or ad only with `confirm: true`, and refuses anything still active (pause first). Past spend and orders stay in the dashboard; the audit log keeps what was deleted |

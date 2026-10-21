@@ -254,6 +254,44 @@ describe("targeting merge", () => {
   });
 });
 
+describe("placements", () => {
+  const build = targetingService.buildPlacements;
+
+  it("automatic means no placement fields; manual lists platforms and positions", () => {
+    expect(build({ automatic: true })).toEqual({});
+    expect(build({ platforms: ["facebook", "instagram"], instagram_positions: ["stream", "story", "reels"], devices: ["mobile"] })).toEqual({
+      publisher_platforms: ["facebook", "instagram"],
+      instagram_positions: ["stream", "story", "reels"],
+      device_platforms: ["mobile"],
+    });
+    // Positions alone imply their platform.
+    expect(build({ instagram_positions: ["reels"] })).toEqual({ publisher_platforms: ["instagram"], instagram_positions: ["reels"] });
+  });
+
+  it("refuses the combinations Meta documents as invalid", () => {
+    expect(() => build({ automatic: true, platforms: ["instagram"] })).toThrow(/either automatic/);
+    expect(() => build({})).toThrow(/automatic: true, or the platforms/);
+    expect(() => build({ platforms: ["facebook"], instagram_positions: ["story"] })).toThrow(/instagram is not in platforms/);
+    expect(() => build({ platforms: ["audience_network"] })).toThrow(/only platform/);
+    expect(() => build({ platforms: ["threads"] })).toThrow(/Instagram too/);
+    expect(() => build({ facebook_positions: ["marketplace"] })).toThrow(/needs Facebook feed/);
+    expect(() => build({ facebook_positions: ["story"] })).toThrow(/Facebook story needs/);
+    expect(() => build({ facebook_positions: ["feed", "story"], devices: ["desktop"] })).toThrow(/mobile/);
+    expect(() => build({ platforms: ["messenger", "facebook"], messenger_positions: ["sponsored_messages"] })).toThrow(/can't be combined/);
+    expect(() => build({ platforms: ["instagram", "threads"], instagram_positions: ["story"] })).toThrow(/Threads feed needs/);
+  });
+
+  it("describes automatic and manual placements", () => {
+    expect(targetingService.describePlacements({ age_min: 20 }).mode).toBe("automatic");
+    expect(targetingService.describePlacements({ publisher_platforms: ["instagram", "facebook"], instagram_positions: ["reels"] })).toEqual({
+      mode: "manual",
+      platforms: ["instagram", "facebook"],
+      positions: { facebook: "all", instagram: ["reels"] },
+      devices: ["mobile", "desktop"],
+    });
+  });
+});
+
 describe("insights parsing", () => {
   it("extracts conversations and cost per conversation from actions", () => {
     const r = insightsService.parseInsightRow({

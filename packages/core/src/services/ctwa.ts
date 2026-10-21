@@ -13,7 +13,7 @@ import { getVideoThumbnail, uploadImage, uploadVideo, waitForVideoReady } from "
 import { createAdRaw, createAdsetRaw, createCampaignRaw, createCreativeRaw } from "./campaigns.js";
 import { destinationTypeForApps, sortApps, type MessagingApp, type ResolvedCreative } from "./creative-payload.js";
 import { getSettings } from "./settings.js";
-import { resolveCityKey } from "./targeting.js";
+import { buildPlacements, describePlacements, resolveCityKey } from "./targeting.js";
 
 type CtwaInput = z.input<typeof createCtwaInput>;
 type CreateAdsetDestination = z.input<typeof adsetDestination>;
@@ -82,6 +82,9 @@ async function run(ctx: CoreContext, input: CtwaInput) {
   }
   steps.push(`uploaded ${media.length} media file(s)`);
 
+  // Bad placement combinations are refused before anything is created.
+  const placementFields = input.placements ? buildPlacements(input.placements) : {};
+
   // ---- steps 2-5 with rollback
   const created: Created[] = [];
   try {
@@ -108,6 +111,7 @@ async function run(ctx: CoreContext, input: CtwaInput) {
         interests: input.interests,
         // Advantage+ audience cannot hold a minimum age above 25, so a stricter age turns it off.
         advantage_audience: input.advantage_audience ?? ageMin <= 25,
+        placements: input.placements,
       },
     });
     created.push({ type: "adset", id: adset.adset_id });
@@ -155,6 +159,7 @@ async function run(ctx: CoreContext, input: CtwaInput) {
       daily_budget_pkr: input.daily_budget,
       messaging_apps: apps,
       targeting_summary: { city: cityName ?? cityKey, city_key: cityKey, age_min: ageMin, age_max: ageMax, gender },
+      placements: describePlacements(placementFields),
       steps,
       next_step:
         "Everything is PAUSED. Review it in Ads Manager, then activate with set_status(object_id=<campaign_id>, status=ACTIVE, confirm=true) after the user confirms.",

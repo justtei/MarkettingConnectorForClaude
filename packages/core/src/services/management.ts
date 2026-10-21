@@ -12,13 +12,20 @@ import {
 } from "../guards.js";
 import { describeError, MetaApiError } from "../meta/errors.js";
 import { fromMinorUnits, toMinorUnits } from "../meta/money.js";
-import type { budgetInput, statusInput, targetingUpdateInput, TargetingInput } from "../schemas.js";
+import type { budgetInput, placementsUpdateInput, statusInput, targetingUpdateInput, TargetingInput } from "../schemas.js";
 import { getCurrency } from "./account.js";
 import { getCampaignTree, readObject } from "./campaigns.js";
 import { rebuildCampaignCopy } from "./duplicate.js";
 import { mirrorStatus } from "./mirror.js";
 import { getSettings } from "./settings.js";
-import { buildTargeting, mergeTargeting, resolveCityKey, validateTargetingSpec } from "./targeting.js";
+import {
+  buildTargeting,
+  describePlacements,
+  mergeTargeting,
+  resolveCityKey,
+  validateTargetingSpec,
+  withoutPlacements,
+} from "./targeting.js";
 
 type StatusInput = z.input<typeof statusInput>;
 type BudgetInput = z.infer<typeof budgetInput>;
@@ -148,7 +155,9 @@ export async function updateTargeting(ctx: CoreContext, input: TargetingUpdate) 
   if (type !== "adset") throw new UserInputError(`${input.adset_id} is a ${type}, not an ad set.`);
   const current = (obj.targeting ?? {}) as Record<string, unknown>;
   const changes = await buildTargeting(ctx, input.changes);
-  const merged = input.replace ? changes : mergeTargeting(current, changes);
+  // New placements replace the old ones as a whole (stale positions would otherwise survive the merge).
+  const base = input.changes.placements || input.changes.publisher_platforms ? withoutPlacements(current) : current;
+  const merged = input.replace ? changes : mergeTargeting(base, changes);
   if (!input.replace) {
     if (input.changes.gender === "all") delete merged.genders;
     if (input.changes.interests && input.changes.interests.length === 0) delete merged.flexible_spec;
@@ -158,8 +167,35 @@ export async function updateTargeting(ctx: CoreContext, input: TargetingUpdate) 
   return audited(ctx, "update_targeting", { objectId: obj.id, request: input, before: { targeting: current } }, async () => {
     await ctx.meta.post(obj.id, { targeting: merged });
     await ctx.db.adSet.updateMany({ where: { id: obj.id }, data: { targeting: merged as object } });
-    return { adset_id: obj.id, name: obj.name, targeting: merged, previous_targeting: current };
+    return {
+      adset_id: obj.id,
+      name: obj.name,
+      targeting: merged,
+      previous_targeting: current,
+      placements: describePlacements(merged),
+      previous_placements: describePlacements(current),
+    };
   });
+}
+
+/** get_placements: where an ad set's ads show now. */
+export async function getPlacements(ctx: CoreContext, input: { adset_id: string }) {
+  const { type, obj } = await readObject(ctx, input.adset_id);
+  if (type !== "adset") throw new UserInputError(`${input.adset_id} is a ${type}, not an ad set. Placements are set per ad set.`);
+  return { adset_id: obj.id, name: obj.name, destination_type: obj.destination_type ?? null, placements: describePlacements(obj.targeting) };
+}
+
+/** update_placements: sets where an ad set's ads show (Advantage+ automatic, or chosen apps and positions). */
+export async function updatePlacements(ctx: CoreContext, input: z.infer<typeof placementsUpdateInput>) {
+  const { adset_id, confirm, ...placements } = input;
+  const out = await updateTargeting(ctx, { adset_id, changes: { placements }, replace: false, confirm });
+  return {
+    adset_id: out.adset_id,
+    name: out.name,
+    placements: out.placements,
+    previous_placements: out.previous_placements,
+    note: "Meta re-checks the ads against the new placements; delivery can dip briefly while the ad set re-learns.",
+  };
 }
 
 /** Phase 2: bulk status / budget edits. Each item goes through the same guards. */

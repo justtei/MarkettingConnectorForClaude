@@ -10,6 +10,42 @@ export const pkr = z.number().positive().max(100_000_000);
 
 export const gender = z.enum(["all", "female", "male"]);
 
+/** Meta placement values (Marketing API placement targeting reference, checked October 2026). */
+export const placementsInput = z
+  .object({
+    automatic: z
+      .boolean()
+      .optional()
+      .describe("true = Advantage+ placements: Meta picks placements itself (clears every manual choice below). Meta's recommended default."),
+    platforms: z
+      .array(z.enum(["facebook", "instagram", "messenger", "threads", "audience_network"]))
+      .min(1)
+      .optional()
+      .describe("Apps to show ads on. Threads needs instagram too; audience_network can't be alone."),
+    facebook_positions: z
+      .array(
+        z.enum(["feed", "profile_feed", "marketplace", "video_feeds", "right_hand_column", "story", "facebook_reels", "facebook_reels_overlay", "instream_video", "search", "notification"]),
+      )
+      .optional()
+      .describe("Facebook: feed, profile_feed, marketplace, video_feeds, right_hand_column, story, facebook_reels, facebook_reels_overlay (ads on reels), instream_video, search, notification. marketplace/search/profile_feed/notification need feed."),
+    instagram_positions: z
+      .array(z.enum(["stream", "profile_feed", "story", "reels", "profile_reels", "explore", "explore_home", "ig_search"]))
+      .optional()
+      .describe("Instagram: stream (= feed), profile_feed, story, reels, profile_reels, explore, explore_home, ig_search."),
+    messenger_positions: z
+      .array(z.enum(["story", "sponsored_messages"]))
+      .optional()
+      .describe("Messenger: story (needs Facebook feed or Instagram story), sponsored_messages (can't be combined with anything else)."),
+    threads_positions: z.array(z.enum(["threads_stream"])).optional().describe("Threads feed; needs Instagram stream."),
+    audience_network_positions: z.array(z.enum(["classic", "rewarded_video"])).optional(),
+    devices: z.array(z.enum(["mobile", "desktop"])).min(1).optional().describe("Default: both."),
+  })
+  .describe(
+    "Placements (where the ads show). Either automatic: true, or platforms plus optional positions; a platform with no positions " +
+      "listed shows in all its positions.",
+  );
+export type PlacementsInput = z.infer<typeof placementsInput>;
+
 export const targetingInput = z
   .object({
     cities: z.array(z.string().min(2)).max(25).optional().describe("City names, e.g. ['Karachi'] (searched in Pakistan)."),
@@ -41,7 +77,11 @@ export const targetingInput = z
     interests: z.array(z.object({ id: metaId, name: z.string().optional() })).max(50).optional(),
     custom_audience_ids: z.array(metaId).optional(),
     excluded_custom_audience_ids: z.array(metaId).optional(),
-    publisher_platforms: z.array(z.enum(["facebook", "instagram", "messenger", "audience_network"])).optional(),
+    publisher_platforms: z
+      .array(z.enum(["facebook", "instagram", "messenger", "threads", "audience_network"]))
+      .optional()
+      .describe("Shortcut for placements.platforms."),
+    placements: placementsInput.optional(),
     advantage_audience: z.boolean().optional().describe("Let Meta expand beyond the audience (Advantage+ audience)."),
     raw: z.record(z.string(), z.unknown()).optional().describe("Advanced: raw Meta targeting fields merged last."),
   })
@@ -278,6 +318,7 @@ export const createCtwaInput = z.object({
     .boolean()
     .optional()
     .describe("Advantage+ audience (Meta treats age/gender as suggestions). Default: on when age_min is 25 or lower, else off."),
+  placements: placementsInput.optional().describe("Where the ads show. Default: Advantage+ (automatic) placements."),
   creatives: z.array(ctwaCreative).min(1).max(10),
   headline: z.string().max(255).optional().describe("Default headline for creatives that have none."),
   primary_text: z.string().max(2200).optional().describe("Default primary text for creatives that have none."),
@@ -299,6 +340,11 @@ export const statusInput = z.object({
 export const budgetInput = z.object({
   object_id: metaId.describe("Ad set ID (or campaign ID for campaign-budget campaigns)"),
   daily_budget: pkr.describe("New daily budget in PKR"),
+  confirm: z.boolean().optional().describe("Must be true. Ask the user first."),
+});
+
+export const placementsUpdateInput = placementsInput.extend({
+  adset_id: metaId,
   confirm: z.boolean().optional().describe("Must be true. Ask the user first."),
 });
 

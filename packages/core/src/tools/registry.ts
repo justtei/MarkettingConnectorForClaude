@@ -21,6 +21,7 @@ import {
   metaId,
   statusInput,
   targetingInput,
+  placementsUpdateInput,
   targetingUpdateInput,
 } from "../schemas.js";
 import * as account from "../services/account.js";
@@ -335,9 +336,41 @@ export const tools = [
     group: "Management",
     phase: 1,
     level: "live",
-    description: "Change an ad set's targeting. Changes are merged into the current targeting unless replace: true." + CONFIRM_NOTE,
+    description:
+      "Change an ad set's targeting (location, age, gender, interests, audiences, placements). Changes are merged into the current " +
+      "targeting unless replace: true. For placements only, update_placements is simpler." +
+      CONFIRM_NOTE,
     input: targetingUpdateInput,
     handler: (ctx, i) => management.updateTargeting(ctx, i),
+  }),
+  tool({
+    name: "get_placements",
+    title: "Get placements",
+    group: "Management",
+    phase: 1,
+    level: "read",
+    staffAllowed: true,
+    description:
+      "Where an ad set's ads show: automatic (Advantage+ placements) or the chosen apps (Facebook, Instagram, Messenger, Threads, " +
+      "Audience Network), positions (feed, stories, reels, ...) and devices. Placements are set per ad set.",
+    input: z.object({ adset_id: metaId }),
+    handler: (ctx, i) => management.getPlacements(ctx, i),
+  }),
+  tool({
+    name: "update_placements",
+    title: "Change placements",
+    group: "Management",
+    phase: 1,
+    level: "live",
+    description:
+      "Change where an ad set's ads show. automatic: true = Advantage+ placements (Meta chooses). Otherwise give platforms " +
+      "(facebook, instagram, messenger, threads, audience_network) and optionally positions per platform, e.g. instagram_positions " +
+      "['stream','story','reels'] and facebook_positions ['feed','story','facebook_reels']; a platform without positions uses all of " +
+      "them. devices: mobile / desktop. Replaces the current placements as a whole. Use placement_report first to see which " +
+      "placements are expensive. Click-to-message ads may not run on every position; Meta refuses unsupported ones." +
+      CONFIRM_NOTE,
+    input: placementsUpdateInput,
+    handler: (ctx, i) => management.updatePlacements(ctx, i),
   }),
   tool({
     name: "delete_object",
@@ -498,7 +531,7 @@ export const tools = [
       "Change an ad set's non-targeting settings: name, bid strategy (LOWEST_COST_WITHOUT_CAP, COST_CAP, LOWEST_COST_WITH_BID_CAP) and " +
       "bid_amount in PKR (the cost cap: the cost per result to hold while scaling), attribution window (click 1 or 7 days, view 0 or 1), " +
       "start / end time. With a campaign budget the bid strategy is set on the campaign. Everything but a rename needs confirm: true. " +
-      "Budgets: update_budget; targeting: update_targeting." + CONFIRM_NOTE,
+      "Budgets: update_budget; targeting: update_targeting; placements: update_placements." + CONFIRM_NOTE,
     input: z.object({
       adset_id: metaId,
       name: z.string().min(1).max(400).optional(),
@@ -620,7 +653,9 @@ export const tools = [
     phase: 2,
     level: "read",
     staffAllowed: true,
-    description: "Spend, chats and cost per chat by placement (Facebook/Instagram, feed/stories/reels), flagging expensive placements.",
+    description:
+      "Spend, chats and cost per chat by placement (Facebook/Instagram, feed/stories/reels), flagging expensive placements. " +
+      "Change them with update_placements.",
     input: z.object({ ...dateRange.shape, object_id: metaId.optional() }),
     handler: (ctx, i) => analysis.placementReport(ctx, i),
   }),

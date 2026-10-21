@@ -25,7 +25,7 @@ import {
 } from "./mirror.js";
 import { REVIEW_FIELDS, reviewOf } from "./review.js";
 import { getSettings } from "./settings.js";
-import { buildTargeting, validateTargetingSpec, withExplicitAdvantageAudience } from "./targeting.js";
+import { buildTargeting, describePlacements, validateTargetingSpec, withExplicitAdvantageAudience } from "./targeting.js";
 
 type CreateCampaign = z.input<typeof createCampaignInput>;
 type CreateAdset = z.input<typeof createAdsetInput>;
@@ -404,6 +404,7 @@ export async function getCampaignTree(ctx: CoreContext, campaignId: string) {
       start_time: s.start_time ?? null,
       end_time: s.end_time ?? null,
       issues: reviewOf(s)?.reasons ?? [],
+      placements: describePlacements(s.targeting),
       targeting: s.targeting,
       ads: ads
         .filter((a) => a.adset_id === s.id)
